@@ -25,5 +25,6 @@ COPY --from=builder /app/goodmock /usr/bin/goodmock
 
 EXPOSE 8080
 
+ENV PORT=8080
 ENTRYPOINT ["/usr/bin/goodmock"]
-CMD ["-port", "8080"]
+CMD ["replay"]

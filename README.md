@@ -27,21 +27,26 @@ Prerequisites:
 
 ```bash
 go build -o goodmock .
-./goodmock -port 8080
+./goodmock replay
 ```
 
 ## Usage
 
-### Command-Line Flags
+```
+goodmock <mode>
+```
 
-| Flag    | Default | Description          |
-|---------|---------|----------------------|
-| `-port` | `8080`  | Port to listen on    |
+### Modes
+
+| Mode     | Description                                          |
+|----------|------------------------------------------------------|
+| `replay` | Serve pre-recorded stub responses (default)          |
 
 ### Environment Variables
 
 | Variable       | Default            | Description                                                          |
 |----------------|--------------------|--------------------------------------------------------------------- |
+| `PORT`         | `8080`             | Port to listen on                                                    |
 | `PROXY_HOST`   | `http://localhost` | Proxy host used for Origin and Referer header rewriting              |
 | `REFERER_PATH` | `/`                | App-specific path appended to `PROXY_HOST` for Referer header        |
 | `MAPPINGS_DIR` | _(unset)_          | Directory of JSON mapping files to load on startup                   |
@@ -51,7 +56,7 @@ go build -o goodmock .
 Set `MAPPINGS_DIR` to a directory containing WireMock-format JSON files:
 
 ```bash
-MAPPINGS_DIR=./mappings ./goodmock
+MAPPINGS_DIR=./mappings ./goodmock replay
 ```
 
 Each file should contain a `mappings` array:

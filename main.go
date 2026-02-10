@@ -3,18 +3,43 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/valyala/fasthttp"
 )
 
+func getPort() int {
+	if p := os.Getenv("PORT"); p != "" {
+		if port, err := strconv.Atoi(p); err == nil {
+			return port
+		}
+		log.Fatalf("Invalid PORT value: %s", p)
+	}
+	return 8080
+}
+
 func main() {
-	port := flag.Int("port", 8080, "Port to listen on")
-	flag.Parse()
+	// First arg is the mode (default: replay)
+	mode := "replay"
+	if len(os.Args) > 1 {
+		mode = os.Args[1]
+	}
+
+	switch mode {
+	case "replay":
+		runReplay()
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown mode: %s\nUsage: goodmock <mode>\nModes: replay\n", mode)
+		os.Exit(1)
+	}
+}
+
+func runReplay() {
+	port := getPort()
 
 	proxyHost := os.Getenv("PROXY_HOST")
 	if proxyHost == "" {
@@ -58,12 +83,13 @@ func main() {
 		}
 	}
 
-	addr := fmt.Sprintf(":%d", *port)
+	addr := fmt.Sprintf(":%d", port)
 
 	fmt.Println("┌──────────────────────────────────────────────────────────────────────────────┐")
 	fmt.Println("|                                                                              |")
 	fmt.Printf("|   GoodMock - Wiremock-compatible mock server (fasthttp)                      |\n")
-	fmt.Printf("|   Port: %-69d|\n", *port)
+	fmt.Printf("|   Mode: %-69s|\n", "replay")
+	fmt.Printf("|   Port: %-69d|\n", port)
 	fmt.Println("|                                                                              |")
 	fmt.Println("└──────────────────────────────────────────────────────────────────────────────┘")
 
