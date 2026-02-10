@@ -21,7 +21,12 @@ func main() {
 		proxyHost = "http://localhost"
 	}
 
-	server := NewServer(proxyHost)
+	refererPath := os.Getenv("REFERER_PATH")
+	if refererPath == "" {
+		refererPath = "/"
+	}
+
+	server := NewServer(proxyHost, refererPath)
 
 	// Load mappings from MAPPINGS_DIR env if set
 	mappingsDir := os.Getenv("MAPPINGS_DIR")

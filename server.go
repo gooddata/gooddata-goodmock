@@ -10,10 +10,11 @@ import (
 )
 
 // NewServer creates a new mock server
-func NewServer(proxyHost string) *Server {
+func NewServer(proxyHost, refererPath string) *Server {
 	return &Server{
-		mappings:  make([]Mapping, 0),
-		proxyHost: proxyHost,
+		mappings:    make([]Mapping, 0),
+		proxyHost:   proxyHost,
+		refererPath: refererPath,
 	}
 }
 
@@ -36,6 +37,16 @@ func (s *Server) ClearMappings() {
 	s.mu.Lock()
 	s.mappings = make([]Mapping, 0)
 	s.mu.Unlock()
+}
+
+// transformRequestHeaders rewrites incoming request headers to match recorded stubs.
+// Equivalent to WireMock's RequestHeadersTransformer extension.
+func (s *Server) transformRequestHeaders(h *fasthttp.RequestHeader) {
+	if s.proxyHost != "" {
+		h.Set("Origin", s.proxyHost)
+		h.Set("Referer", s.proxyHost+s.refererPath)
+	}
+	h.Set("Accept-Encoding", "gzip")
 }
 
 // applyResponseHeaders applies response header transformations
@@ -62,7 +73,13 @@ func (s *Server) applyResponseHeaders(ctx *fasthttp.RequestCtx, headers map[stri
 
 // HandleRequest handles incoming HTTP requests
 func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
-	path := string(ctx.Path())
+	// Use the raw request URI to preserve percent-encoding (e.g. %3A)
+	// fasthttp's ctx.Path() decodes these, but WireMock mappings store encoded forms.
+	rawURI := string(ctx.RequestURI())
+	path := rawURI
+	if idx := strings.IndexByte(rawURI, '?'); idx != -1 {
+		path = rawURI[:idx]
+	}
 	method := string(ctx.Method())
 
 	// Admin API endpoints
@@ -71,14 +88,13 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	// Rewrite request headers to match recorded stubs
+	s.transformRequestHeaders(&ctx.Request.Header)
+
 	body := ctx.PostBody()
 
-	// Build the full URI (path + query string) for WireMock-compatible "url" matching
-	fullURI := path
-	qs := string(ctx.QueryArgs().QueryString())
-	if qs != "" {
-		fullURI = path + "?" + qs
-	}
+	// fullURI is the raw URI (path + query string) for WireMock-compatible "url" matching
+	fullURI := rawURI
 
 	// Find matching stub
 	result := s.matchRequest(method, path, fullURI, ctx.QueryArgs(), body, &ctx.Request.Header)
