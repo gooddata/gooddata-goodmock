@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-02-10
+
+### Added
+- Record mode (`goodmock record`) — proxies to upstream and captures request/response pairs
+- `/__admin/recordings/snapshot` endpoint with URL pattern filtering and scenario support
+- Automatic gzip decompression for recorded response bodies
+- Scenario-based mappings for repeated URLs (`repeatsAsScenarios`)
+- `VERBOSE` environment variable for full request/response traffic logging
+
 ## [0.2.1] - 2026-02-10
 
 ### Changed
@@ -30,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
+[0.3.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/gooddata/gooddata-goodmock/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/gooddata/gooddata-goodmock/compare/v0.1.0...v0.1.1

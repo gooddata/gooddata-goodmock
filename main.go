@@ -12,6 +12,11 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+func isVerbose() bool {
+	v := strings.ToLower(os.Getenv("VERBOSE"))
+	return v == "true" || v == "1" || v == "yes"
+}
+
 func getPort() int {
 	if p := os.Getenv("PORT"); p != "" {
 		if port, err := strconv.Atoi(p); err == nil {
@@ -32,8 +37,10 @@ func main() {
 	switch mode {
 	case "replay":
 		runReplay()
+	case "record":
+		runRecord()
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown mode: %s\nUsage: goodmock <mode>\nModes: replay\n", mode)
+		fmt.Fprintf(os.Stderr, "Unknown mode: %s\nUsage: goodmock <mode>\nModes: replay, record\n", mode)
 		os.Exit(1)
 	}
 }
@@ -51,7 +58,8 @@ func runReplay() {
 		refererPath = "/"
 	}
 
-	server := NewServer(proxyHost, refererPath)
+	verbose := isVerbose()
+	server := NewServer(proxyHost, refererPath, verbose)
 
 	// Load mappings from MAPPINGS_DIR env if set
 	mappingsDir := os.Getenv("MAPPINGS_DIR")
@@ -90,6 +98,7 @@ func runReplay() {
 	fmt.Printf("|   GoodMock - Wiremock-compatible mock server (fasthttp)                      |\n")
 	fmt.Printf("|   Mode: %-69s|\n", "replay")
 	fmt.Printf("|   Port: %-69d|\n", port)
+	fmt.Printf("|   Verbose: %-66v|\n", verbose)
 	fmt.Println("|                                                                              |")
 	fmt.Println("└──────────────────────────────────────────────────────────────────────────────┘")
 
