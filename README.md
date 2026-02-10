@@ -40,10 +40,11 @@ go build -o goodmock .
 
 ### Environment Variables
 
-| Variable       | Default            | Description                                        |
-|----------------|--------------------|----------------------------------------------------|
-| `PROXY_HOST`   | `http://localhost` | Proxy host used for cookie domain transformations  |
-| `MAPPINGS_DIR` | _(unset)_          | Directory of JSON mapping files to load on startup |
+| Variable       | Default            | Description                                                          |
+|----------------|--------------------|--------------------------------------------------------------------- |
+| `PROXY_HOST`   | `http://localhost` | Proxy host used for Origin and Referer header rewriting              |
+| `REFERER_PATH` | `/`                | App-specific path appended to `PROXY_HOST` for Referer header        |
+| `MAPPINGS_DIR` | _(unset)_          | Directory of JSON mapping files to load on startup                   |
 
 ### Loading Mappings on Startup
 
@@ -113,6 +114,26 @@ curl -X POST http://localhost:8080/__admin/mappings \
     }
   }'
 ```
+
+## Request Header Rewriting
+
+GoodMock rewrites incoming request headers before stub matching, equivalent to WireMock's `RequestHeadersTransformer` extension. This ensures requests from the browser (pointing at localhost) match headers recorded against the original proxy host.
+
+| Header            | Rewritten to                      |
+|-------------------|-----------------------------------|
+| `Origin`          | `PROXY_HOST`                      |
+| `Referer`         | `PROXY_HOST` + `REFERER_PATH`     |
+| `Accept-Encoding` | `gzip`                            |
+
+Per-app `REFERER_PATH` values:
+
+| App                      | `REFERER_PATH` |
+|--------------------------|----------------|
+| home-ui                  | `/`            |
+| gdc-analytical-designer  | `/analyze/`    |
+| gdc-dashboards           | `/dashboards/` |
+| gdc-meditor              | `/metrics/`    |
+| gdc-msf-modeler          | `/analyze/`    |
 
 ## Request Matching
 

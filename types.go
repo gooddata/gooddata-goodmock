@@ -65,9 +65,10 @@ type Response struct {
 
 // Server holds the mock server state
 type Server struct {
-	mu        sync.RWMutex
-	mappings  []Mapping
-	proxyHost string
+	mu          sync.RWMutex
+	mappings    []Mapping
+	proxyHost   string
+	refererPath string
 }
 
 // MatchResult holds the result of matching a request against a stub

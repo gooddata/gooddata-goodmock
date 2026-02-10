@@ -10,10 +10,11 @@ import (
 )
 
 // NewServer creates a new mock server
-func NewServer(proxyHost string) *Server {
+func NewServer(proxyHost, refererPath string) *Server {
 	return &Server{
-		mappings:  make([]Mapping, 0),
-		proxyHost: proxyHost,
+		mappings:    make([]Mapping, 0),
+		proxyHost:   proxyHost,
+		refererPath: refererPath,
 	}
 }
 
@@ -36,6 +37,16 @@ func (s *Server) ClearMappings() {
 	s.mu.Lock()
 	s.mappings = make([]Mapping, 0)
 	s.mu.Unlock()
+}
+
+// transformRequestHeaders rewrites incoming request headers to match recorded stubs.
+// Equivalent to WireMock's RequestHeadersTransformer extension.
+func (s *Server) transformRequestHeaders(h *fasthttp.RequestHeader) {
+	if s.proxyHost != "" {
+		h.Set("Origin", s.proxyHost)
+		h.Set("Referer", s.proxyHost+s.refererPath)
+	}
+	h.Set("Accept-Encoding", "gzip")
 }
 
 // applyResponseHeaders applies response header transformations
@@ -70,6 +81,9 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 		s.handleAdmin(ctx, path, method)
 		return
 	}
+
+	// Rewrite request headers to match recorded stubs
+	s.transformRequestHeaders(&ctx.Request.Header)
 
 	body := ctx.PostBody()
 
