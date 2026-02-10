@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-02-10
 
+### Fixed
+- URL path matching now preserves percent-encoding (e.g. `%3A`) by using raw request URI instead of fasthttp's decoded path
+
 ### Added
 - Request header rewriting (Origin, Referer, Accept-Encoding) to match recorded stubs
 - `REFERER_PATH` environment variable for app-specific Referer header path

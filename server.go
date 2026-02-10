@@ -73,7 +73,13 @@ func (s *Server) applyResponseHeaders(ctx *fasthttp.RequestCtx, headers map[stri
 
 // HandleRequest handles incoming HTTP requests
 func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
-	path := string(ctx.Path())
+	// Use the raw request URI to preserve percent-encoding (e.g. %3A)
+	// fasthttp's ctx.Path() decodes these, but WireMock mappings store encoded forms.
+	rawURI := string(ctx.RequestURI())
+	path := rawURI
+	if idx := strings.IndexByte(rawURI, '?'); idx != -1 {
+		path = rawURI[:idx]
+	}
 	method := string(ctx.Method())
 
 	// Admin API endpoints
@@ -87,12 +93,8 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 
 	body := ctx.PostBody()
 
-	// Build the full URI (path + query string) for WireMock-compatible "url" matching
-	fullURI := path
-	qs := string(ctx.QueryArgs().QueryString())
-	if qs != "" {
-		fullURI = path + "?" + qs
-	}
+	// fullURI is the raw URI (path + query string) for WireMock-compatible "url" matching
+	fullURI := rawURI
 
 	// Find matching stub
 	result := s.matchRequest(method, path, fullURI, ctx.QueryArgs(), body, &ctx.Request.Header)
