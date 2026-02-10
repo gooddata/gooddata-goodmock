@@ -1,0 +1,7 @@
+---
+version: 3
+project:
+  id: gooddata-goodmock
+
+telemetry:
+  scope: 'off'
