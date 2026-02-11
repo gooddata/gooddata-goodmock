@@ -1,5 +1,5 @@
 // (C) 2025 GoodData Corporation
-package main
+package proxy
 
 import (
 	"bufio"
@@ -9,8 +9,8 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// proxyRequest forwards a request to the upstream server and returns the response details.
-func proxyRequest(client *fasthttp.Client, upstream string, ctx *fasthttp.RequestCtx) (int, map[string][]string, []byte, error) {
+// ProxyRequest forwards a request to the upstream server and returns the response details.
+func ProxyRequest(client *fasthttp.Client, upstream string, ctx *fasthttp.RequestCtx) (int, map[string][]string, []byte, error) {
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseRequest(req)

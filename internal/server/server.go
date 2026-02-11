@@ -1,9 +1,12 @@
 // (C) 2025 GoodData Corporation
-package main
+package server
 
 import (
 	"encoding/json"
 	"fmt"
+	"goodmock/internal/logging"
+	"goodmock/internal/matching"
+	"goodmock/internal/types"
 	"log"
 	"strings"
 
@@ -11,35 +14,35 @@ import (
 )
 
 // NewServer creates a new mock server
-func NewServer(proxyHost, refererPath string, verbose bool) *Server {
-	return &Server{
-		mappings:    make([]Mapping, 0),
-		proxyHost:   proxyHost,
-		refererPath: refererPath,
-		verbose:     verbose,
+func NewServer(proxyHost, refererPath string, verbose bool) *types.Server {
+	return &types.Server{
+		Mappings:    make([]types.Mapping, 0),
+		ProxyHost:   proxyHost,
+		RefererPath: refererPath,
+		Verbose:     verbose,
 	}
 }
 
-func loadMappings(s *Server, wm WiremockMappings) {
-	s.mu.Lock()
-	s.mappings = append(s.mappings, wm.Mappings...)
-	s.mu.Unlock()
+func LoadMappings(s *types.Server, wm types.WiremockMappings) {
+	s.Mu.Lock()
+	s.Mappings = append(s.Mappings, wm.Mappings...)
+	s.Mu.Unlock()
 }
 
-func addMapping(s *Server, m Mapping) {
-	s.mu.Lock()
-	s.mappings = append(s.mappings, m)
-	s.mu.Unlock()
+func addMapping(s *types.Server, m types.Mapping) {
+	s.Mu.Lock()
+	s.Mappings = append(s.Mappings, m)
+	s.Mu.Unlock()
 }
 
-func clearMappings(s *Server) {
-	s.mu.Lock()
-	s.mappings = make([]Mapping, 0)
-	s.mu.Unlock()
+func ClearMappings(s *types.Server) {
+	s.Mu.Lock()
+	s.Mappings = make([]types.Mapping, 0)
+	s.Mu.Unlock()
 }
 
-// transformRequestHeaders rewrites incoming request headers to match recorded stubs.
-func transformRequestHeaders(h *fasthttp.RequestHeader, proxyHost, refererPath string) {
+// TransformRequestHeaders rewrites incoming request headers to match recorded stubs.
+func TransformRequestHeaders(h *fasthttp.RequestHeader, proxyHost, refererPath string) {
 	if proxyHost != "" {
 		h.Set("Origin", proxyHost)
 		h.Set("Referer", proxyHost+refererPath)
@@ -68,8 +71,8 @@ func applyResponseHeaders(ctx *fasthttp.RequestCtx, headers map[string]any) {
 	}
 }
 
-// handleRequest handles incoming HTTP requests
-func handleRequest(s *Server, ctx *fasthttp.RequestCtx) {
+// HandleRequest handles incoming HTTP requests
+func HandleRequest(s *types.Server, ctx *fasthttp.RequestCtx) {
 	rawURI := string(ctx.RequestURI())
 	path := rawURI
 	if idx := strings.IndexByte(rawURI, '?'); idx != -1 {
@@ -78,23 +81,23 @@ func handleRequest(s *Server, ctx *fasthttp.RequestCtx) {
 	method := string(ctx.Method())
 
 	if strings.HasPrefix(path, "/__admin") {
-		handleAdmin(s, ctx, path, method)
+		HandleAdmin(s, ctx, path, method)
 		return
 	}
 
-	if s.verbose {
-		logVerboseRequest(ctx, method, rawURI)
+	if s.Verbose {
+		LogVerboseRequest(ctx, method, rawURI)
 	}
 
-	transformRequestHeaders(&ctx.Request.Header, s.proxyHost, s.refererPath)
+	TransformRequestHeaders(&ctx.Request.Header, s.ProxyHost, s.RefererPath)
 
 	body := ctx.PostBody()
 	fullURI := rawURI
 
-	result := matchRequest(s, method, path, fullURI, ctx.QueryArgs(), body, &ctx.Request.Header)
+	result := matching.MatchRequest(s, method, path, fullURI, ctx.QueryArgs(), body, &ctx.Request.Header)
 
 	if !result.Matched {
-		logMismatch(method, fullURI, result)
+		logging.LogMismatch(method, fullURI, result)
 		ctx.SetStatusCode(fasthttp.StatusNotFound)
 		ctx.SetBodyString(`{"error": "No matching stub found"}`)
 		return
@@ -108,12 +111,12 @@ func handleRequest(s *Server, ctx *fasthttp.RequestCtx) {
 		ctx.SetBodyString(m.Response.Body)
 	}
 
-	if s.verbose {
+	if s.Verbose {
 		log.Printf("[verbose] << %d %s", m.Response.Status, method+" "+rawURI)
 	}
 }
 
-func handleAdmin(s *Server, ctx *fasthttp.RequestCtx, path, method string) {
+func HandleAdmin(s *types.Server, ctx *fasthttp.RequestCtx, path, method string) {
 	if path == "/__admin" && method == "GET" {
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		ctx.SetBodyString(`{"status":"ok"}`)
@@ -127,7 +130,7 @@ func handleAdmin(s *Server, ctx *fasthttp.RequestCtx, path, method string) {
 	}
 
 	if path == "/__admin/reset" && method == "POST" {
-		clearMappings(s)
+		ClearMappings(s)
 		log.Println("All mappings reset")
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
@@ -150,21 +153,21 @@ func handleAdmin(s *Server, ctx *fasthttp.RequestCtx, path, method string) {
 	}
 
 	if path == "/__admin/mappings/import" && method == "POST" {
-		var wm WiremockMappings
+		var wm types.WiremockMappings
 		if err := json.Unmarshal(ctx.PostBody(), &wm); err != nil {
 			ctx.SetStatusCode(fasthttp.StatusBadRequest)
 			ctx.SetBodyString(err.Error())
 			return
 		}
 
-		loadMappings(s, wm)
+		LoadMappings(s, wm)
 		log.Printf("Imported %d mappings", len(wm.Mappings))
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
 	}
 
 	if path == "/__admin/mappings/reset" && method == "POST" {
-		clearMappings(s)
+		ClearMappings(s)
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
 	}
@@ -185,10 +188,10 @@ func handleAdmin(s *Server, ctx *fasthttp.RequestCtx, path, method string) {
 	ctx.SetStatusCode(fasthttp.StatusNotFound)
 }
 
-func handleMappings(s *Server, ctx *fasthttp.RequestCtx, method string) {
+func handleMappings(s *types.Server, ctx *fasthttp.RequestCtx, method string) {
 	switch method {
 	case "POST":
-		var m Mapping
+		var m types.Mapping
 		if err := json.Unmarshal(ctx.PostBody(), &m); err != nil {
 			ctx.SetStatusCode(fasthttp.StatusBadRequest)
 			ctx.SetBodyString(err.Error())
@@ -200,13 +203,13 @@ func handleMappings(s *Server, ctx *fasthttp.RequestCtx, method string) {
 		ctx.SetStatusCode(fasthttp.StatusCreated)
 
 	case "DELETE":
-		clearMappings(s)
+		ClearMappings(s)
 		ctx.SetStatusCode(fasthttp.StatusOK)
 
 	case "GET":
-		s.mu.RLock()
-		wm := WiremockMappings{Mappings: s.mappings}
-		s.mu.RUnlock()
+		s.Mu.RLock()
+		wm := types.WiremockMappings{Mappings: s.Mappings}
+		s.Mu.RUnlock()
 
 		ctx.Response.Header.Set("Content-Type", "application/json")
 		data, _ := json.Marshal(wm)
@@ -217,8 +220,8 @@ func handleMappings(s *Server, ctx *fasthttp.RequestCtx, method string) {
 	}
 }
 
-// logVerboseRequest logs incoming request details when verbose mode is enabled.
-func logVerboseRequest(ctx *fasthttp.RequestCtx, method, rawURI string) {
+// LogVerboseRequest logs incoming request details when verbose mode is enabled.
+func LogVerboseRequest(ctx *fasthttp.RequestCtx, method, rawURI string) {
 	log.Printf("[verbose] >> %s %s", method, rawURI)
 	ctx.Request.Header.VisitAll(func(key, value []byte) {
 		log.Printf("[verbose]    %s: %s", string(key), string(value))
@@ -232,7 +235,7 @@ func logVerboseRequest(ctx *fasthttp.RequestCtx, method, rawURI string) {
 	}
 }
 
-func getRequestPattern(m *Mapping) string {
+func getRequestPattern(m *types.Mapping) string {
 	if m.Request.URL != "" {
 		return m.Request.URL
 	}

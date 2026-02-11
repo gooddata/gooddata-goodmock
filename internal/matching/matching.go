@@ -1,9 +1,10 @@
 // (C) 2025 GoodData Corporation
-package main
+package matching
 
 import (
 	"encoding/json"
 	"fmt"
+	"goodmock/internal/types"
 	"regexp"
 	"sort"
 	"strings"
@@ -11,18 +12,18 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// matchRequest finds the best matching stub for the incoming request.
+// MatchRequest finds the best matching stub for the incoming request.
 // When multiple mappings match, returns the most specific one (most query params + body patterns + headers).
-func matchRequest(s *Server, method, path, fullURI string, queryArgs *fasthttp.Args, body []byte, reqHeaders *fasthttp.RequestHeader) MatchResult {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+func MatchRequest(s *types.Server, method, path, fullURI string, queryArgs *fasthttp.Args, body []byte, reqHeaders *fasthttp.RequestHeader) types.MatchResult {
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
 
-	var bestMatch MatchResult
+	var bestMatch types.MatchResult
 	var bestScore int
 	bestMatched := false
 
-	for i := range s.mappings {
-		m := &s.mappings[i]
+	for i := range s.Mappings {
+		m := &s.Mappings[i]
 		result := evaluateMapping(m, method, path, fullURI, queryArgs, body, reqHeaders)
 
 		if result.Matched {
@@ -69,8 +70,8 @@ func matchRequest(s *Server, method, path, fullURI string, queryArgs *fasthttp.A
 }
 
 // evaluateMapping checks how well a mapping matches the request
-func evaluateMapping(m *Mapping, method, path, fullURI string, queryArgs *fasthttp.Args, body []byte, reqHeaders *fasthttp.RequestHeader) MatchResult {
-	result := MatchResult{}
+func evaluateMapping(m *types.Mapping, method, path, fullURI string, queryArgs *fasthttp.Args, body []byte, reqHeaders *fasthttp.RequestHeader) types.MatchResult {
+	result := types.MatchResult{}
 
 	// Check method - "ANY" matches all methods
 	result.MethodMatch = strings.EqualFold(m.Request.Method, method) || strings.EqualFold(m.Request.Method, "ANY")
@@ -157,7 +158,7 @@ func evaluateMapping(m *Mapping, method, path, fullURI string, queryArgs *fastht
 }
 
 // matchBodyPatterns checks if the request body matches all body patterns
-func matchBodyPatterns(patterns []BodyPattern, body []byte) bool {
+func matchBodyPatterns(patterns []types.BodyPattern, body []byte) bool {
 	for _, pattern := range patterns {
 		if pattern.EqualToJSON != nil {
 			if !jsonEqual(pattern.EqualToJSON, body) {
@@ -194,7 +195,7 @@ func jsonEqual(expected json.RawMessage, actual []byte) bool {
 }
 
 // matchHeader checks if an actual header value matches the expected matcher
-func matchHeader(matcher HeaderMatcher, actual string) bool {
+func matchHeader(matcher types.HeaderMatcher, actual string) bool {
 	if matcher.EqualTo != "" {
 		return matcher.EqualTo == actual
 	}
@@ -205,7 +206,7 @@ func matchHeader(matcher HeaderMatcher, actual string) bool {
 }
 
 // getExpectedValues extracts expected values from a query param matcher
-func getExpectedValues(matcher QueryParamMatcher) []string {
+func getExpectedValues(matcher types.QueryParamMatcher) []string {
 	if matcher.EqualTo != "" {
 		return []string{matcher.EqualTo}
 	}

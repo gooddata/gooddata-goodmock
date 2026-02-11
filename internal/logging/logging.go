@@ -1,16 +1,17 @@
 // (C) 2025 GoodData Corporation
-package main
+package logging
 
 import (
 	"fmt"
+	"goodmock/internal/types"
 	"strings"
 	"time"
 )
 
 const colWidth = 58
 
-// logMismatch outputs a request mismatch in the same format as WireMock
-func logMismatch(method, fullURL string, result MatchResult) {
+// LogMismatch outputs a request mismatch in the same format as WireMock
+func LogMismatch(method, fullURL string, result types.MatchResult) {
 	separator := strings.Repeat("-", 119)
 	timestamp := time.Now().UTC().Format("2006-01-02 15:04:05.000")
 
