@@ -1,6 +1,6 @@
 # GoodMock
 
-A lightweight, high-performance [WireMock](https://wiremock.org/)-compatible HTTP mock server written in Go, powered by [fasthttp](https://github.com/valyala/fasthttp). GoodMock supports **replay** and **record** modes — it can serve pre-recorded stub responses or proxy traffic to an upstream backend while recording WireMock-compatible mapping files.
+A lightweight, high-performance [WireMock](https://wiremock.org/)-compatible HTTP mock server written in Go, powered by [fasthttp](https://github.com/valyala/fasthttp). GoodMock supports **replay**, **record**, and **proxy** modes — it can serve pre-recorded stub responses, proxy traffic to an upstream backend while recording WireMock-compatible mapping files, or act as a pure pass-through proxy.
 
 ## Features
 
@@ -42,6 +42,7 @@ goodmock <mode>
 |----------|-----------------------------------------------------------------  |
 | `replay` | Serve pre-recorded stub responses (default)                       |
 | `record` | Proxy to upstream and record exchanges as WireMock mappings       |
+| `proxy`  | Proxy to upstream without recording (pure pass-through)           |
 
 ### Environment Variables
 
@@ -146,6 +147,16 @@ The snapshot endpoint supports:
 - `filters.urlPattern` — regex to filter which recordings to include
 - `repeatsAsScenarios` — when `true`, creates scenario-based mappings for repeated URLs
 - `persist` — accepted but ignored (mappings are always returned in the response)
+
+## Proxy Mode
+
+In proxy mode, GoodMock forwards all requests to the upstream backend (`PROXY_HOST`) and returns responses to the client — without recording any exchanges. The same header transformations and response filtering (gzip decompression, `X-GDC*`/`Date` stripping) apply as in record mode.
+
+```bash
+PROXY_HOST=https://my-backend.example.com ./goodmock proxy
+```
+
+This is useful for local development when you want requests routed through GoodMock (with header rewriting) but don't need to capture mappings.
 
 ## Request Header Rewriting
 

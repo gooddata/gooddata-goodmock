@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"goodmock/internal/common"
+	"goodmock/internal/pureproxy"
 	"goodmock/internal/record"
 	"goodmock/internal/server"
 	"goodmock/internal/types"
@@ -27,8 +28,10 @@ func main() {
 		runReplay()
 	case "record":
 		record.RunRecord()
+	case "proxy":
+		pureproxy.RunProxy()
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown mode: %s\nUsage: goodmock <mode>\nModes: replay, record\n", mode)
+		fmt.Fprintf(os.Stderr, "Unknown mode: %s\nUsage: goodmock <mode>\nModes: replay, record, proxy\n", mode)
 		os.Exit(1)
 	}
 }
