@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-02-11
+
+### Added
+- `application/json` response bodies are now always stored as structured JSON (`jsonBody`) instead of escaped strings, improving diffability of mapping files
+- `JSON_CONTENT_TYPES` environment variable (record mode) — comma-separated list of additional Content-Types to also store as `jsonBody` (e.g. `application/vnd.gooddata.api+json`)
+- Replay mode supports serving both `body` (string) and `jsonBody` (structured) response formats
+- `PRESERVE_JSON_KEY_ORDER` environment variable (record mode) — when set, preserves original key ordering in both JSON request bodies (`equalToJson`) and response bodies (`jsonBody`) instead of sorting alphabetically
+- `SORT_ARRAY_MEMBERS` environment variable (record mode) — when set, recursively sorts JSON array elements by their stringified value (bottom-up) in both request and response bodies, eliminating diffs caused by non-deterministic array ordering from upstream
+- Recorded mappings are now sorted deterministically by name (with method + URL + query params + body as tiebreaker for duplicate names), eliminating spurious diffs caused by request-arrival ordering
+
+### Removed
+- Removed `id` and `uuid` fields from recorded mappings — they were random UUIDs that caused spurious diffs on every re-record and were never used for matching or lookup
+
+### Changed
+- **Breaking (output only):** Mapping files produced by record mode are no longer WireMock-compatible as of v0.5.0 — `application/json` responses use `jsonBody` (structured JSON) instead of `body` (escaped strings), and mappings omit `id`/`uuid` fields. Replay mode remains fully backwards-compatible: old WireMock-format mapping files (with `body` strings and `id`/`uuid` fields) still load and work without changes. The admin API also remains WireMock-compatible.
+- **Breaking (key order):** JSON keys in both request bodies (`equalToJson`) and response bodies (`jsonBody`) are now sorted alphabetically by default for deterministic diffs. If your consumers rely on original key ordering from the upstream server, set `PRESERVE_JSON_KEY_ORDER=true` to restore the previous behaviour.
+- `VERBOSE` environment variable now accepts any non-empty value (previously required `true`, `1`, or `yes`)
+
 ## [0.4.0] - 2026-02-11
 
 ### Added
@@ -60,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
+[0.5.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/gooddata/gooddata-goodmock/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/gooddata/gooddata-goodmock/compare/v0.3.0...v0.3.1

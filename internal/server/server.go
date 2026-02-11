@@ -107,7 +107,12 @@ func HandleRequest(s *types.Server, ctx *fasthttp.RequestCtx) {
 	applyResponseHeaders(ctx, m.Response.Headers)
 
 	ctx.SetStatusCode(m.Response.Status)
-	if m.Response.Body != "" {
+	if m.Response.JsonBody != nil {
+		data, err := json.Marshal(m.Response.JsonBody)
+		if err == nil {
+			ctx.SetBody(data)
+		}
+	} else if m.Response.Body != "" {
 		ctx.SetBodyString(m.Response.Body)
 	}
 
