@@ -10,7 +10,7 @@ import (
 const colWidth = 58
 
 // logMismatch outputs a request mismatch in the same format as WireMock
-func (s *Server) logMismatch(method, fullURL string, result MatchResult) {
+func logMismatch(method, fullURL string, result MatchResult) {
 	separator := strings.Repeat("-", 119)
 	timestamp := time.Now().UTC().Format("2006-01-02 15:04:05.000")
 
