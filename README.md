@@ -1,10 +1,10 @@
 # GoodMock
 
-A lightweight, high-performance [WireMock](https://wiremock.org/)-compatible HTTP mock server written in Go, powered by [fasthttp](https://github.com/valyala/fasthttp). GoodMock supports **replay**, **record**, and **proxy** modes — it can serve pre-recorded stub responses, proxy traffic to an upstream backend while recording WireMock-compatible mapping files, or act as a pure pass-through proxy.
+A lightweight, high-performance mock server written in Go, powered by [fasthttp](https://github.com/valyala/fasthttp). GoodMock supports **replay**, **record**, and **proxy** modes — it can serve pre-recorded stub responses, proxy traffic to an upstream backend while recording mapping files, or act as a pure pass-through proxy.
 
 ## Features
 
-- WireMock-compatible mapping format and admin API
+- WireMock-compatible admin API (`/__admin` endpoints)
 - Request matching by URL, URL path, URL pattern (regex), query parameters, headers, and JSON body
 - Runtime mapping management via `/__admin` endpoints
 - Load mappings from JSON files on startup
@@ -38,23 +38,24 @@ goodmock <mode>
 
 ### Modes
 
-| Mode     | Description                                                       |
-|----------|-----------------------------------------------------------------  |
-| `replay` | Serve pre-recorded stub responses (default)                       |
-| `record` | Proxy to upstream and record exchanges as WireMock mappings       |
-| `proxy`  | Proxy to upstream without recording (pure pass-through)           |
+| Mode     | Description                                                 |
+|----------|-------------------------------------------------------------|
+| `replay` | Serve pre-recorded stub responses (default)                 |
+| `record` | Proxy to upstream and record exchanges as WireMock mappings |
+| `proxy`  | Proxy to upstream without recording (pure pass-through)     |
 
 ### Environment Variables
 
-| Variable       | Default            | Description                                                          |
-|----------------|--------------------|--------------------------------------------------------------------- |
-| Variable       | Default            | Modes          | Description                                              |
-|----------------|--------------------| ---------------|----------------------------------------------------------|
-| `PORT`         | `8080`             | all            | Port to listen on                                        |
-| `PROXY_HOST`   | `http://localhost` | all            | Upstream host (record: proxy target; replay: header rewriting) |
-| `REFERER_PATH` | `/`                | all            | App-specific path appended to `PROXY_HOST` for Referer header |
-| `MAPPINGS_DIR` | _(unset)_          | replay         | Directory of JSON mapping files to load on startup       |
-| `VERBOSE`      | `false`            | all            | Log all request/response traffic (`true`, `1`, or `yes`) |
+| Variable                  | Default            | Modes  | Description                                                                                           |
+|---------------------------|--------------------|--------|-------------------------------------------------------------------------------------------------------|
+| `PORT`                    | `8080`             | all    | Port to listen on                                                                                     |
+| `PROXY_HOST`              | `http://localhost` | all    | Upstream host (record: proxy target; replay: header rewriting)                                        |
+| `REFERER_PATH`            | `/`                | all    | App-specific path appended to `PROXY_HOST` for Referer header                                         |
+| `MAPPINGS_DIR`            | _(unset)_          | replay | Directory of JSON mapping files to load on startup                                                    |
+| `VERBOSE`                 | _(unset)_          | all    | Log all request/response traffic (any value enables)                                                  |
+| `JSON_CONTENT_TYPES`      | _(unset)_          | record | Additional Content-Types to store as structured JSON (see below)                                      |
+| `PRESERVE_JSON_KEY_ORDER` | _(unset)_          | record | Preserve original key order in JSON request and response bodies (any value enables)                   |
+| `SORT_ARRAY_MEMBERS`      | _(unset)_          | record | Recursively sort JSON array elements by stringified value for deterministic diffs (any value enables) |
 
 ### Loading Mappings on Startup
 
@@ -90,19 +91,19 @@ Each file should contain a `mappings` array:
 
 GoodMock exposes a subset of the WireMock admin API under `/__admin`:
 
-| Method   | Endpoint                       | Description                  |
-|----------|--------------------------------|------------------------------|
-| `GET`    | `/__admin`                     | Health check                 |
-| `GET`    | `/__admin/health`              | Health check                 |
-| `GET`    | `/__admin/mappings`            | List all loaded mappings     |
-| `POST`   | `/__admin/mappings`            | Add a single mapping         |
-| `DELETE` | `/__admin/mappings`            | Delete all mappings          |
-| `POST`   | `/__admin/mappings/import`     | Import a batch of mappings   |
-| `POST`   | `/__admin/mappings/reset`      | Reset all mappings           |
-| `POST`   | `/__admin/reset`               | Reset all mappings           |
-| `POST`   | `/__admin/settings`            | Acknowledge settings (no-op) |
-| `POST`   | `/__admin/scenarios/reset`     | Reset scenarios (no-op)      |
-| `DELETE` | `/__admin/requests`            | Clear request log / recordings |
+| Method   | Endpoint                       | Description                            |
+|----------|--------------------------------|----------------------------------------|
+| `GET`    | `/__admin`                     | Health check                           |
+| `GET`    | `/__admin/health`              | Health check                           |
+| `GET`    | `/__admin/mappings`            | List all loaded mappings               |
+| `POST`   | `/__admin/mappings`            | Add a single mapping                   |
+| `DELETE` | `/__admin/mappings`            | Delete all mappings                    |
+| `POST`   | `/__admin/mappings/import`     | Import a batch of mappings             |
+| `POST`   | `/__admin/mappings/reset`      | Reset all mappings                     |
+| `POST`   | `/__admin/reset`               | Reset all mappings                     |
+| `POST`   | `/__admin/settings`            | Acknowledge settings (no-op)           |
+| `POST`   | `/__admin/scenarios/reset`     | Reset scenarios (no-op)                |
+| `DELETE` | `/__admin/requests`            | Clear request log / recordings         |
 | `POST`   | `/__admin/recordings/snapshot` | Export recorded mappings (record mode) |
 
 ### Adding a Mapping at Runtime
@@ -158,6 +159,44 @@ PROXY_HOST=https://my-backend.example.com ./goodmock proxy
 
 This is useful for local development when you want requests routed through GoodMock (with header rewriting) but don't need to capture mappings.
 
+## Structured JSON Response Bodies
+
+In record mode, `application/json` response bodies are always stored as structured JSON in the `jsonBody` field instead of escaped strings in the `body` field. This makes mapping files diffable and human-readable.
+
+`JSON_CONTENT_TYPES` adds additional Content-Types to this behavior:
+
+```bash
+JSON_CONTENT_TYPES="application/vnd.gooddata.api+json,application/vnd.api+json" \
+  PROXY_HOST=https://my-backend.example.com ./goodmock record
+```
+
+This produces mapping files with structured, diffable response bodies:
+
+```json
+{
+  "response": {
+    "status": 200,
+    "jsonBody": {
+      "data": [1, 2, 3],
+      "meta": {"total": 3}
+    }
+  }
+}
+```
+
+Instead of:
+
+```json
+{
+  "response": {
+    "status": 200,
+    "body": "{\"data\":[1,2,3],\"meta\":{\"total\":3}}"
+  }
+}
+```
+
+Replay mode serves both formats — `jsonBody` is marshaled back to JSON on the fly, `body` is served as-is.
+
 ## Request Header Rewriting
 
 GoodMock rewrites incoming request headers before stub matching, equivalent to WireMock's `RequestHeadersTransformer` extension. This ensures requests from the browser (pointing at localhost) match headers recorded against the original proxy host.
@@ -193,6 +232,46 @@ Requests are matched against loaded mappings using the following criteria:
 | `bodyPatterns`     | Match JSON body (`equalToJson`)                      |
 
 When no mapping matches, GoodMock returns a `404` with a diagnostic log showing the closest stub and where the mismatch occurred.
+
+## WireMock Compatibility
+
+GoodMock's **admin API** (`/__admin` endpoints) is WireMock-compatible — tools like Cypress WireMock integrations work without changes.
+
+Mapping files **produced by record mode** are not WireMock-compatible as of v0.5.0:
+- `application/json` response bodies are stored as structured `jsonBody` objects instead of escaped `body` strings. `JSON_CONTENT_TYPES` adds additional Content-Types to this behavior.
+- Mappings omit `id` and `uuid` fields (WireMock generates random UUIDs that cause spurious diffs)
+
+**Replay mode is fully backwards-compatible** — old WireMock-format mapping files (with `body` strings, `id`/`uuid` fields, etc.) still load and work without any changes.
+
+## Migrating from WireMock
+
+### Step 1: Switch replay to GoodMock
+
+Replace the WireMock image with GoodMock in your docker-compose for replay mode. Your existing WireMock mapping files will work as-is — no re-recording needed.
+
+```yaml
+backend-mock:
+    image: gooddata/gooddata-goodmock:0.5.0
+    environment:
+        - REFERER_PATH=/your-app-path/
+```
+
+Run your test suite. If anything breaks, [open an issue](https://github.com/gooddata/gooddata-goodmock/issues).
+
+### Step 2: Switch record to GoodMock
+
+Once replay is stable, replace WireMock for recording as well:
+
+```yaml
+backend-mock:
+    image: gooddata/gooddata-goodmock:0.5.0
+    command: ["record"]
+    environment:
+        - PROXY_HOST=${HOST}
+        - JSON_CONTENT_TYPES=application/vnd.gooddata.api+json
+```
+
+Re-record your test mappings, then verify they replay correctly. The new mapping files will use GoodMock's format (`jsonBody`, no `id`/`uuid`) — diffs should be significantly cleaner going forward. If you hit any issues, [open an issue](https://github.com/gooddata/gooddata-goodmock/issues).
 
 ## License
 

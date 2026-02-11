@@ -13,8 +13,6 @@ type WiremockMappings struct {
 
 // Mapping represents a single request-response mapping
 type Mapping struct {
-	ID                    string   `json:"id,omitempty"`
-	UUID                  string   `json:"uuid,omitempty"`
 	Name                  string   `json:"name,omitempty"`
 	ScenarioName          string   `json:"scenarioName,omitempty"`
 	RequiredScenarioState string   `json:"requiredScenarioState,omitempty"`
@@ -62,6 +60,7 @@ type HeaderMatcher struct {
 type Response struct {
 	Status       int            `json:"status"`
 	Body         string         `json:"body,omitempty"`
+	JsonBody     any            `json:"jsonBody,omitempty"`
 	Headers      map[string]any `json:"headers,omitempty"`
 	ProxyBaseUrl string         `json:"proxyBaseUrl,omitempty"`
 }

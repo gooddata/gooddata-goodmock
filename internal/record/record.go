@@ -3,10 +3,10 @@ package record
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"goodmock/internal/common"
+	"goodmock/internal/jsonutil"
 	"goodmock/internal/proxy"
 	"goodmock/internal/server"
 	"goodmock/internal/types"
@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -32,20 +33,26 @@ type RecordedExchange struct {
 
 // RecordServer proxies requests to an upstream backend and records exchanges.
 type RecordServer struct {
-	server    *types.Server
-	mu        sync.Mutex
-	exchanges []RecordedExchange
-	upstream  string
-	client    *fasthttp.Client
+	server           *types.Server
+	mu               sync.Mutex
+	exchanges        []RecordedExchange
+	upstream         string
+	client           *fasthttp.Client
+	jsonContentTypes []string
+	preserveKeyOrder bool
+	sortArrayMembers bool
 }
 
 // NewRecordServer creates a new recording proxy server.
-func NewRecordServer(upstream, proxyHost, refererPath string, verbose bool) *RecordServer {
+func NewRecordServer(upstream, proxyHost, refererPath string, verbose bool, jsonContentTypes []string, preserveKeyOrder, sortArrayMembers bool) *RecordServer {
 	return &RecordServer{
-		server:    server.NewServer(proxyHost, refererPath, verbose),
-		exchanges: make([]RecordedExchange, 0),
-		upstream:  upstream,
-		client:    &fasthttp.Client{},
+		server:           server.NewServer(proxyHost, refererPath, verbose),
+		exchanges:        make([]RecordedExchange, 0),
+		upstream:         upstream,
+		client:           &fasthttp.Client{},
+		jsonContentTypes: jsonContentTypes,
+		preserveKeyOrder: preserveKeyOrder,
+		sortArrayMembers: sortArrayMembers,
 	}
 }
 
@@ -201,11 +208,11 @@ func handleSnapshot(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 	// as [] not null (Cypress spreads this array and null is not iterable)
 	mappings := make([]types.Mapping, 0)
 	if snapReq.RepeatsAsScenarios {
-		if m := exchangesToScenarioMappings(filtered); m != nil {
+		if m := exchangesToScenarioMappings(filtered, rs.jsonContentTypes, rs.preserveKeyOrder, rs.sortArrayMembers); m != nil {
 			mappings = m
 		}
 	} else {
-		if m := exchangesToMappings(filtered); m != nil {
+		if m := exchangesToMappings(filtered, rs.jsonContentTypes, rs.preserveKeyOrder, rs.sortArrayMembers); m != nil {
 			mappings = m
 		}
 	}
@@ -223,7 +230,7 @@ func handleSnapshot(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 // exchangesToMappings converts exchanges to mappings, deduplicating by
 // method + path + query params + body (keeping the last occurrence).
 // This matches WireMock's snapshot behavior with repeatsAsScenarios=false.
-func exchangesToMappings(exchanges []RecordedExchange) []types.Mapping {
+func exchangesToMappings(exchanges []RecordedExchange, jsonContentTypes []string, preserveKeyOrder, sortArrayMembers bool) []types.Mapping {
 	type dedupEntry struct {
 		key     string
 		mapping types.Mapping
@@ -233,7 +240,7 @@ func exchangesToMappings(exchanges []RecordedExchange) []types.Mapping {
 	var entries []dedupEntry
 
 	for _, ex := range exchanges {
-		m := exchangeToMapping(ex)
+		m := exchangeToMapping(ex, jsonContentTypes, preserveKeyOrder, sortArrayMembers)
 		key := deduplicationKey(m)
 
 		if idx, exists := seen[key]; exists {
@@ -249,6 +256,7 @@ func exchangesToMappings(exchanges []RecordedExchange) []types.Mapping {
 	for _, e := range entries {
 		mappings = append(mappings, e.mapping)
 	}
+	sortMappings(mappings)
 	return mappings
 }
 
@@ -278,7 +286,7 @@ func deduplicationKey(m types.Mapping) string {
 }
 
 // exchangesToScenarioMappings converts exchanges to mappings, creating scenarios for repeated URLs.
-func exchangesToScenarioMappings(exchanges []RecordedExchange) []types.Mapping {
+func exchangesToScenarioMappings(exchanges []RecordedExchange, jsonContentTypes []string, preserveKeyOrder, sortArrayMembers bool) []types.Mapping {
 	// Group by URL+method
 	type group struct {
 		key       string
@@ -303,12 +311,12 @@ func exchangesToScenarioMappings(exchanges []RecordedExchange) []types.Mapping {
 		g := groups[key]
 		if len(g.exchanges) == 1 {
 			// Single occurrence — no scenario needed
-			mappings = append(mappings, exchangeToMapping(g.exchanges[0]))
+			mappings = append(mappings, exchangeToMapping(g.exchanges[0], jsonContentTypes, preserveKeyOrder, sortArrayMembers))
 		} else {
 			// Multiple occurrences — create scenario chain
 			scenarioName := generateMappingName(g.exchanges[0].URL)
 			for i, ex := range g.exchanges {
-				m := exchangeToMapping(ex)
+				m := exchangeToMapping(ex, jsonContentTypes, preserveKeyOrder, sortArrayMembers)
 				m.ScenarioName = scenarioName
 				if i == 0 {
 					m.RequiredScenarioState = "Started"
@@ -322,11 +330,23 @@ func exchangesToScenarioMappings(exchanges []RecordedExchange) []types.Mapping {
 			}
 		}
 	}
+	sortMappings(mappings)
 	return mappings
 }
 
+// sortMappings sorts mappings by name, using the deduplication key as tiebreaker
+// for mappings with identical names.
+func sortMappings(mappings []types.Mapping) {
+	sort.SliceStable(mappings, func(i, j int) bool {
+		if mappings[i].Name != mappings[j].Name {
+			return mappings[i].Name < mappings[j].Name
+		}
+		return deduplicationKey(mappings[i]) < deduplicationKey(mappings[j])
+	})
+}
+
 // exchangeToMapping converts a recorded exchange to a WireMock mapping.
-func exchangeToMapping(ex RecordedExchange) types.Mapping {
+func exchangeToMapping(ex RecordedExchange, jsonContentTypes []string, preserveKeyOrder, sortArrayMembers bool) types.Mapping {
 	// Split URL into path and query parameters
 	rawPath := ex.URL
 	var queryString string
@@ -336,7 +356,6 @@ func exchangeToMapping(ex RecordedExchange) types.Mapping {
 	}
 
 	name := generateMappingName(ex.URL)
-	uuid := generateUUID()
 
 	req := types.Request{
 		Method: ex.Method,
@@ -356,21 +375,42 @@ func exchangeToMapping(ex RecordedExchange) types.Mapping {
 
 	// Add body pattern for requests with body
 	if len(ex.ReqBody) > 0 {
-		// Check if body is valid JSON — store as a JSON string (WireMock format)
-		var js json.RawMessage
-		if json.Unmarshal(ex.ReqBody, &js) == nil {
-			// Compact the JSON and wrap as a quoted string
-			compacted, err := compactJSON(ex.ReqBody)
-			if err == nil {
-				quoted, _ := json.Marshal(string(compacted))
-				falseVal := false
-				req.BodyPatterns = []types.BodyPattern{
-					{
-						EqualToJSON:         json.RawMessage(quoted),
-						IgnoreArrayOrder:    &falseVal,
-						IgnoreExtraElements: &falseVal,
-					},
+		var bodyBytes []byte
+		if preserveKeyOrder {
+			if sortArrayMembers {
+				var parsed any
+				if json.Unmarshal(ex.ReqBody, &parsed) == nil {
+					parsed = jsonutil.SortArrays(parsed)
+					if b, err := json.Marshal(parsed); err == nil {
+						bodyBytes = b
+					}
 				}
+			} else {
+				compacted, err := compactJSON(ex.ReqBody)
+				if err == nil {
+					bodyBytes = compacted
+				}
+			}
+		} else {
+			var parsed any
+			if json.Unmarshal(ex.ReqBody, &parsed) == nil {
+				if sortArrayMembers {
+					parsed = jsonutil.SortArrays(parsed)
+				}
+				if b, err := json.Marshal(parsed); err == nil {
+					bodyBytes = b
+				}
+			}
+		}
+		if bodyBytes != nil {
+			quoted, _ := json.Marshal(string(bodyBytes))
+			falseVal := false
+			req.BodyPatterns = []types.BodyPattern{
+				{
+					EqualToJSON:         json.RawMessage(quoted),
+					IgnoreArrayOrder:    &falseVal,
+					IgnoreExtraElements: &falseVal,
+				},
 			}
 		}
 	}
@@ -398,17 +438,60 @@ func exchangeToMapping(ex RecordedExchange) types.Mapping {
 		}
 	}
 
-	return types.Mapping{
-		ID:      uuid,
-		UUID:    uuid,
-		Name:    name,
-		Request: req,
-		Response: types.Response{
-			Status:  ex.Status,
-			Body:    string(ex.RespBody),
-			Headers: headers,
-		},
+	resp := types.Response{
+		Status:  ex.Status,
+		Headers: headers,
 	}
+
+	// Store as structured JSON if Content-Type matches, otherwise as string
+	if isJSONContentType(ex.RespHeaders, jsonContentTypes) {
+		if preserveKeyOrder && !sortArrayMembers {
+			// Use json.RawMessage to preserve original key order from upstream
+			var raw json.RawMessage
+			if json.Unmarshal(ex.RespBody, &raw) == nil {
+				resp.JsonBody = raw
+			} else {
+				resp.Body = string(ex.RespBody)
+			}
+		} else {
+			// Unmarshal to interface{} — json.Marshal will sort keys alphabetically
+			var parsed any
+			if json.Unmarshal(ex.RespBody, &parsed) == nil {
+				if sortArrayMembers {
+					parsed = jsonutil.SortArrays(parsed)
+				}
+				resp.JsonBody = parsed
+			} else {
+				resp.Body = string(ex.RespBody)
+			}
+		}
+	} else {
+		resp.Body = string(ex.RespBody)
+	}
+
+	return types.Mapping{
+		Name:     name,
+		Request:  req,
+		Response: resp,
+	}
+}
+
+// isJSONContentType checks if the response Content-Type matches any of the given JSON types.
+func isJSONContentType(headers map[string][]string, jsonTypes []string) bool {
+	for key, values := range headers {
+		if !strings.EqualFold(key, "Content-Type") {
+			continue
+		}
+		for _, v := range values {
+			mediaType := strings.TrimSpace(strings.SplitN(v, ";", 2)[0])
+			for _, jt := range jsonTypes {
+				if strings.EqualFold(mediaType, jt) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // normalizeHeaderName converts a header name to HTTP canonical form (Title-Case),
@@ -437,15 +520,6 @@ func compactJSON(data []byte) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-// generateUUID generates a random UUID v4 string.
-func generateUUID() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	b[6] = (b[6] & 0x0f) | 0x40 // version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // variant
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // parseQueryParams parses a raw query string into WireMock QueryParamMatcher format.
@@ -549,7 +623,10 @@ func RunRecord() {
 	}
 
 	verbose := common.IsVerbose()
-	rs := NewRecordServer(upstream, upstream, refererPath, verbose)
+	jsonContentTypes := common.ParseJSONContentTypes()
+	preserveKeyOrder := common.PreserveJSONKeyOrder()
+	sortArrayMembers := common.SortArrayMembers()
+	rs := NewRecordServer(upstream, upstream, refererPath, verbose, jsonContentTypes, preserveKeyOrder, sortArrayMembers)
 
 	addr := fmt.Sprintf(":%d", port)
 
