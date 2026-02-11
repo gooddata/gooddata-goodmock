@@ -1,5 +1,5 @@
 // (C) 2025 GoodData Corporation
-package main
+package types
 
 import (
 	"encoding/json"
@@ -68,11 +68,11 @@ type Response struct {
 
 // Server holds the mock server state
 type Server struct {
-	mu          sync.RWMutex
-	mappings    []Mapping
-	proxyHost   string
-	refererPath string
-	verbose     bool
+	Mu          sync.RWMutex
+	Mappings    []Mapping
+	ProxyHost   string
+	RefererPath string
+	Verbose     bool
 }
 
 // MatchResult holds the result of matching a request against a stub

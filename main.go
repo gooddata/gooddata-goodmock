@@ -4,28 +4,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"goodmock/internal/common"
+	"goodmock/internal/record"
+	"goodmock/internal/server"
+	"goodmock/internal/types"
 	"log"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/valyala/fasthttp"
 )
-
-func isVerbose() bool {
-	v := strings.ToLower(os.Getenv("VERBOSE"))
-	return v == "true" || v == "1" || v == "yes"
-}
-
-func getPort() int {
-	if p := os.Getenv("PORT"); p != "" {
-		if port, err := strconv.Atoi(p); err == nil {
-			return port
-		}
-		log.Fatalf("Invalid PORT value: %s", p)
-	}
-	return 8080
-}
 
 func main() {
 	// First arg is the mode (default: replay)
@@ -38,7 +26,7 @@ func main() {
 	case "replay":
 		runReplay()
 	case "record":
-		runRecord()
+		record.RunRecord()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown mode: %s\nUsage: goodmock <mode>\nModes: replay, record\n", mode)
 		os.Exit(1)
@@ -46,7 +34,7 @@ func main() {
 }
 
 func runReplay() {
-	port := getPort()
+	port := common.GetPort()
 
 	proxyHost := os.Getenv("PROXY_HOST")
 	if proxyHost == "" {
@@ -58,8 +46,8 @@ func runReplay() {
 		refererPath = "/"
 	}
 
-	verbose := isVerbose()
-	server := NewServer(proxyHost, refererPath, verbose)
+	verbose := common.IsVerbose()
+	s := server.NewServer(proxyHost, refererPath, verbose)
 
 	// Load mappings from MAPPINGS_DIR env if set
 	mappingsDir := os.Getenv("MAPPINGS_DIR")
@@ -79,11 +67,11 @@ func runReplay() {
 						log.Printf("Warning: Could not read mapping file %s: %v", filePath, err)
 						continue
 					}
-					var wm WiremockMappings
+					var wm types.WiremockMappings
 					if err := json.Unmarshal(data, &wm); err != nil {
 						log.Printf("Warning: Could not parse mapping file %s: %v", filePath, err)
 					} else {
-						loadMappings(server, wm)
+						server.LoadMappings(s, wm)
 						log.Printf("Loaded %d mappings from %s", len(wm.Mappings), filePath)
 					}
 				}
@@ -103,6 +91,6 @@ func runReplay() {
 	fmt.Println("└──────────────────────────────────────────────────────────────────────────────┘")
 
 	log.Fatal(fasthttp.ListenAndServe(addr, func(ctx *fasthttp.RequestCtx) {
-		handleRequest(server, ctx)
+		server.HandleRequest(s, ctx)
 	}))
 }

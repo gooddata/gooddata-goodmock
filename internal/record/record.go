@@ -1,11 +1,15 @@
 // (C) 2025 GoodData Corporation
-package main
+package record
 
 import (
 	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"goodmock/internal/common"
+	"goodmock/internal/proxy"
+	"goodmock/internal/server"
+	"goodmock/internal/types"
 	"log"
 	"net/url"
 	"os"
@@ -28,7 +32,7 @@ type RecordedExchange struct {
 
 // RecordServer proxies requests to an upstream backend and records exchanges.
 type RecordServer struct {
-	server    *Server
+	server    *types.Server
 	mu        sync.Mutex
 	exchanges []RecordedExchange
 	upstream  string
@@ -38,7 +42,7 @@ type RecordServer struct {
 // NewRecordServer creates a new recording proxy server.
 func NewRecordServer(upstream, proxyHost, refererPath string, verbose bool) *RecordServer {
 	return &RecordServer{
-		server:    NewServer(proxyHost, refererPath, verbose),
+		server:    server.NewServer(proxyHost, refererPath, verbose),
 		exchanges: make([]RecordedExchange, 0),
 		upstream:  upstream,
 		client:    &fasthttp.Client{},
@@ -60,12 +64,12 @@ func handleRecordRequest(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	if rs.server.verbose {
-		logVerboseRequest(ctx, method, rawURI)
+	if rs.server.Verbose {
+		server.LogVerboseRequest(ctx, method, rawURI)
 	}
 
 	// Transform request headers before proxying
-	transformRequestHeaders(&ctx.Request.Header, rs.server.proxyHost, rs.server.refererPath)
+	server.TransformRequestHeaders(&ctx.Request.Header, rs.server.ProxyHost, rs.server.RefererPath)
 
 	// In record mode, always proxy and record — no stub matching
 	proxyAndRecord(rs, ctx)
@@ -73,7 +77,7 @@ func handleRecordRequest(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 
 // proxyAndRecord forwards the request to upstream, records the exchange, and returns the response.
 func proxyAndRecord(rs *RecordServer, ctx *fasthttp.RequestCtx) {
-	status, respHeaders, body, err := proxyRequest(rs.client, rs.upstream, ctx)
+	status, respHeaders, body, err := proxy.ProxyRequest(rs.client, rs.upstream, ctx)
 	if err != nil {
 		log.Printf("Proxy error: %v", err)
 		ctx.SetStatusCode(502)
@@ -121,7 +125,7 @@ func proxyAndRecord(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 	ctx.SetStatusCode(status)
 	ctx.SetBody(body)
 
-	if rs.server.verbose {
+	if rs.server.Verbose {
 		log.Printf("[verbose] << %d %s %s (%d bytes)", status, string(ctx.Method()), string(ctx.RequestURI()), len(body))
 	}
 }
@@ -141,7 +145,7 @@ func handleRecordAdmin(rs *RecordServer, ctx *fasthttp.RequestCtx, path, method 
 
 	// Reset clears both stubs and recordings
 	if (path == "/__admin/reset" || path == "/__admin/mappings/reset") && method == "POST" {
-		clearMappings(rs.server)
+		server.ClearMappings(rs.server)
 		clearExchanges(rs)
 		log.Println("All mappings and recordings reset")
 		ctx.SetStatusCode(fasthttp.StatusOK)
@@ -156,7 +160,7 @@ func handleRecordAdmin(rs *RecordServer, ctx *fasthttp.RequestCtx, path, method 
 	}
 
 	// Delegate everything else to the replay server's admin handler
-	handleAdmin(rs.server, ctx, path, method)
+	server.HandleAdmin(rs.server, ctx, path, method)
 }
 
 // SnapshotRequest represents the body of a POST /__admin/recordings/snapshot request.
@@ -195,7 +199,7 @@ func handleSnapshot(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 
 	// Convert to mappings — always use non-nil slice so JSON marshals
 	// as [] not null (Cypress spreads this array and null is not iterable)
-	mappings := make([]Mapping, 0)
+	mappings := make([]types.Mapping, 0)
 	if snapReq.RepeatsAsScenarios {
 		if m := exchangesToScenarioMappings(filtered); m != nil {
 			mappings = m
@@ -206,7 +210,7 @@ func handleSnapshot(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 		}
 	}
 
-	result := WiremockMappings{Mappings: mappings}
+	result := types.WiremockMappings{Mappings: mappings}
 	data, _ := json.Marshal(result)
 	ctx.Response.Header.Set("Content-Type", "application/json")
 	ctx.SetStatusCode(fasthttp.StatusOK)
@@ -219,10 +223,10 @@ func handleSnapshot(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 // exchangesToMappings converts exchanges to mappings, deduplicating by
 // method + path + query params + body (keeping the last occurrence).
 // This matches WireMock's snapshot behavior with repeatsAsScenarios=false.
-func exchangesToMappings(exchanges []RecordedExchange) []Mapping {
+func exchangesToMappings(exchanges []RecordedExchange) []types.Mapping {
 	type dedupEntry struct {
 		key     string
-		mapping Mapping
+		mapping types.Mapping
 	}
 
 	seen := make(map[string]int) // key -> index in entries
@@ -241,7 +245,7 @@ func exchangesToMappings(exchanges []RecordedExchange) []Mapping {
 		}
 	}
 
-	mappings := make([]Mapping, 0, len(entries))
+	mappings := make([]types.Mapping, 0, len(entries))
 	for _, e := range entries {
 		mappings = append(mappings, e.mapping)
 	}
@@ -250,7 +254,7 @@ func exchangesToMappings(exchanges []RecordedExchange) []Mapping {
 
 // deduplicationKey builds a key from a mapping's request fields for deduplication.
 // Uses method + url/urlPath + sorted query params + body patterns.
-func deduplicationKey(m Mapping) string {
+func deduplicationKey(m types.Mapping) string {
 	path := m.Request.URL
 	if path == "" {
 		path = m.Request.URLPath
@@ -274,7 +278,7 @@ func deduplicationKey(m Mapping) string {
 }
 
 // exchangesToScenarioMappings converts exchanges to mappings, creating scenarios for repeated URLs.
-func exchangesToScenarioMappings(exchanges []RecordedExchange) []Mapping {
+func exchangesToScenarioMappings(exchanges []RecordedExchange) []types.Mapping {
 	// Group by URL+method
 	type group struct {
 		key       string
@@ -294,7 +298,7 @@ func exchangesToScenarioMappings(exchanges []RecordedExchange) []Mapping {
 		g.exchanges = append(g.exchanges, ex)
 	}
 
-	var mappings []Mapping
+	var mappings []types.Mapping
 	for _, key := range order {
 		g := groups[key]
 		if len(g.exchanges) == 1 {
@@ -322,7 +326,7 @@ func exchangesToScenarioMappings(exchanges []RecordedExchange) []Mapping {
 }
 
 // exchangeToMapping converts a recorded exchange to a WireMock mapping.
-func exchangeToMapping(ex RecordedExchange) Mapping {
+func exchangeToMapping(ex RecordedExchange) types.Mapping {
 	// Split URL into path and query parameters
 	rawPath := ex.URL
 	var queryString string
@@ -334,7 +338,7 @@ func exchangeToMapping(ex RecordedExchange) Mapping {
 	name := generateMappingName(ex.URL)
 	uuid := generateUUID()
 
-	req := Request{
+	req := types.Request{
 		Method: ex.Method,
 	}
 
@@ -360,7 +364,7 @@ func exchangeToMapping(ex RecordedExchange) Mapping {
 			if err == nil {
 				quoted, _ := json.Marshal(string(compacted))
 				falseVal := false
-				req.BodyPatterns = []BodyPattern{
+				req.BodyPatterns = []types.BodyPattern{
 					{
 						EqualToJSON:         json.RawMessage(quoted),
 						IgnoreArrayOrder:    &falseVal,
@@ -394,12 +398,12 @@ func exchangeToMapping(ex RecordedExchange) Mapping {
 		}
 	}
 
-	return Mapping{
-		ID:   uuid,
-		UUID: uuid,
-		Name: name,
+	return types.Mapping{
+		ID:      uuid,
+		UUID:    uuid,
+		Name:    name,
 		Request: req,
-		Response: Response{
+		Response: types.Response{
 			Status:  ex.Status,
 			Body:    string(ex.RespBody),
 			Headers: headers,
@@ -446,7 +450,7 @@ func generateUUID() string {
 
 // parseQueryParams parses a raw query string into WireMock QueryParamMatcher format.
 // Values are URL-decoded to match WireMock's recording behavior.
-func parseQueryParams(qs string) map[string]QueryParamMatcher {
+func parseQueryParams(qs string) map[string]types.QueryParamMatcher {
 	params := make(map[string][]string)
 	var paramOrder []string
 
@@ -463,14 +467,14 @@ func parseQueryParams(qs string) map[string]QueryParamMatcher {
 		params[key] = append(params[key], val)
 	}
 
-	result := make(map[string]QueryParamMatcher)
+	result := make(map[string]types.QueryParamMatcher)
 	for _, key := range paramOrder {
 		values := params[key]
-		matchers := make([]EqualMatcher, len(values))
+		matchers := make([]types.EqualMatcher, len(values))
 		for i, v := range values {
-			matchers[i] = EqualMatcher{EqualTo: v}
+			matchers[i] = types.EqualMatcher{EqualTo: v}
 		}
-		result[key] = QueryParamMatcher{HasExactly: matchers}
+		result[key] = types.QueryParamMatcher{HasExactly: matchers}
 	}
 	return result
 }
@@ -530,8 +534,8 @@ func compileURLMatcher(pattern string) func(string) bool {
 	}
 }
 
-func runRecord() {
-	port := getPort()
+func RunRecord() {
+	port := common.GetPort()
 
 	upstream := os.Getenv("PROXY_HOST")
 	if upstream == "" {
@@ -544,7 +548,7 @@ func runRecord() {
 		refererPath = "/"
 	}
 
-	verbose := isVerbose()
+	verbose := common.IsVerbose()
 	rs := NewRecordServer(upstream, upstream, refererPath, verbose)
 
 	addr := fmt.Sprintf(":%d", port)
