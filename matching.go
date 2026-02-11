@@ -13,7 +13,7 @@ import (
 
 // matchRequest finds the best matching stub for the incoming request.
 // When multiple mappings match, returns the most specific one (most query params + body patterns + headers).
-func (s *Server) matchRequest(method, path, fullURI string, queryArgs *fasthttp.Args, body []byte, reqHeaders *fasthttp.RequestHeader) MatchResult {
+func matchRequest(s *Server, method, path, fullURI string, queryArgs *fasthttp.Args, body []byte, reqHeaders *fasthttp.RequestHeader) MatchResult {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -23,7 +23,7 @@ func (s *Server) matchRequest(method, path, fullURI string, queryArgs *fasthttp.
 
 	for i := range s.mappings {
 		m := &s.mappings[i]
-		result := s.evaluateMapping(m, method, path, fullURI, queryArgs, body, reqHeaders)
+		result := evaluateMapping(m, method, path, fullURI, queryArgs, body, reqHeaders)
 
 		if result.Matched {
 			// Calculate specificity: more criteria = more specific
@@ -69,7 +69,7 @@ func (s *Server) matchRequest(method, path, fullURI string, queryArgs *fasthttp.
 }
 
 // evaluateMapping checks how well a mapping matches the request
-func (s *Server) evaluateMapping(m *Mapping, method, path, fullURI string, queryArgs *fasthttp.Args, body []byte, reqHeaders *fasthttp.RequestHeader) MatchResult {
+func evaluateMapping(m *Mapping, method, path, fullURI string, queryArgs *fasthttp.Args, body []byte, reqHeaders *fasthttp.RequestHeader) MatchResult {
 	result := MatchResult{}
 
 	// Check method - "ANY" matches all methods

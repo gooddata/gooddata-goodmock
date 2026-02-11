@@ -20,41 +20,36 @@ func NewServer(proxyHost, refererPath string, verbose bool) *Server {
 	}
 }
 
-// LoadMappings loads mappings from a JSON structure
-func (s *Server) LoadMappings(wm WiremockMappings) {
+func loadMappings(s *Server, wm WiremockMappings) {
 	s.mu.Lock()
 	s.mappings = append(s.mappings, wm.Mappings...)
 	s.mu.Unlock()
 }
 
-// AddMapping adds a single mapping
-func (s *Server) AddMapping(m Mapping) {
+func addMapping(s *Server, m Mapping) {
 	s.mu.Lock()
 	s.mappings = append(s.mappings, m)
 	s.mu.Unlock()
 }
 
-// ClearMappings clears all loaded mappings
-func (s *Server) ClearMappings() {
+func clearMappings(s *Server) {
 	s.mu.Lock()
 	s.mappings = make([]Mapping, 0)
 	s.mu.Unlock()
 }
 
 // transformRequestHeaders rewrites incoming request headers to match recorded stubs.
-// Equivalent to WireMock's RequestHeadersTransformer extension.
-func (s *Server) transformRequestHeaders(h *fasthttp.RequestHeader) {
-	if s.proxyHost != "" {
-		h.Set("Origin", s.proxyHost)
-		h.Set("Referer", s.proxyHost+s.refererPath)
+func transformRequestHeaders(h *fasthttp.RequestHeader, proxyHost, refererPath string) {
+	if proxyHost != "" {
+		h.Set("Origin", proxyHost)
+		h.Set("Referer", proxyHost+refererPath)
 	}
 	h.Set("Accept-Encoding", "gzip")
 }
 
-// applyResponseHeaders applies response header transformations
-func (s *Server) applyResponseHeaders(ctx *fasthttp.RequestCtx, headers map[string]any) {
+// applyResponseHeaders writes response headers to the context, filtering internal ones.
+func applyResponseHeaders(ctx *fasthttp.RequestCtx, headers map[string]any) {
 	for key, value := range headers {
-		// Skip X-GDC... and Date headers
 		upperKey := strings.ToUpper(key)
 		if strings.HasPrefix(upperKey, "X-GDC") || upperKey == "DATE" {
 			continue
@@ -73,10 +68,8 @@ func (s *Server) applyResponseHeaders(ctx *fasthttp.RequestCtx, headers map[stri
 	}
 }
 
-// HandleRequest handles incoming HTTP requests
-func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
-	// Use the raw request URI to preserve percent-encoding (e.g. %3A)
-	// fasthttp's ctx.Path() decodes these, but WireMock mappings store encoded forms.
+// handleRequest handles incoming HTTP requests
+func handleRequest(s *Server, ctx *fasthttp.RequestCtx) {
 	rawURI := string(ctx.RequestURI())
 	path := rawURI
 	if idx := strings.IndexByte(rawURI, '?'); idx != -1 {
@@ -84,39 +77,31 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 	}
 	method := string(ctx.Method())
 
-	// Admin API endpoints
 	if strings.HasPrefix(path, "/__admin") {
-		s.handleAdmin(ctx, path, method)
+		handleAdmin(s, ctx, path, method)
 		return
 	}
 
 	if s.verbose {
-		s.logRequest(ctx, method, rawURI)
+		logVerboseRequest(ctx, method, rawURI)
 	}
 
-	// Rewrite request headers to match recorded stubs
-	s.transformRequestHeaders(&ctx.Request.Header)
+	transformRequestHeaders(&ctx.Request.Header, s.proxyHost, s.refererPath)
 
 	body := ctx.PostBody()
-
-	// fullURI is the raw URI (path + query string) for WireMock-compatible "url" matching
 	fullURI := rawURI
 
-	// Find matching stub
-	result := s.matchRequest(method, path, fullURI, ctx.QueryArgs(), body, &ctx.Request.Header)
+	result := matchRequest(s, method, path, fullURI, ctx.QueryArgs(), body, &ctx.Request.Header)
 
 	if !result.Matched {
-		s.logMismatch(method, fullURI, result)
+		logMismatch(method, fullURI, result)
 		ctx.SetStatusCode(fasthttp.StatusNotFound)
 		ctx.SetBodyString(`{"error": "No matching stub found"}`)
 		return
 	}
 
-	// Apply response
 	m := result.Mapping
-
-	// Set headers
-	s.applyResponseHeaders(ctx, m.Response.Headers)
+	applyResponseHeaders(ctx, m.Response.Headers)
 
 	ctx.SetStatusCode(m.Response.Status)
 	if m.Response.Body != "" {
@@ -128,50 +113,42 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 	}
 }
 
-// handleAdmin handles all admin API endpoints
-func (s *Server) handleAdmin(ctx *fasthttp.RequestCtx, path, method string) {
-	// Health/ready check - GET /__admin
+func handleAdmin(s *Server, ctx *fasthttp.RequestCtx, path, method string) {
 	if path == "/__admin" && method == "GET" {
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		ctx.SetBodyString(`{"status":"ok"}`)
 		return
 	}
 
-	// Health endpoint
 	if path == "/__admin/health" {
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		ctx.SetBodyString(`{"status":"ok"}`)
 		return
 	}
 
-	// Reset mappings - POST /__admin/reset
 	if path == "/__admin/reset" && method == "POST" {
-		s.ClearMappings()
+		clearMappings(s)
 		log.Println("All mappings reset")
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
 	}
 
-	// Settings - POST /__admin/settings (just acknowledge)
 	if path == "/__admin/settings" && method == "POST" {
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
 	}
 
-	// Scenarios reset - POST /__admin/scenarios/reset
 	if path == "/__admin/scenarios/reset" && method == "POST" {
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		ctx.SetBodyString(`{}`)
 		return
 	}
 
-	// Mappings management
 	if path == "/__admin/mappings" {
-		s.handleMappings(ctx, method)
+		handleMappings(s, ctx, method)
 		return
 	}
 
-	// Import mappings - POST /__admin/mappings/import
 	if path == "/__admin/mappings/import" && method == "POST" {
 		var wm WiremockMappings
 		if err := json.Unmarshal(ctx.PostBody(), &wm); err != nil {
@@ -180,26 +157,23 @@ func (s *Server) handleAdmin(ctx *fasthttp.RequestCtx, path, method string) {
 			return
 		}
 
-		s.LoadMappings(wm)
+		loadMappings(s, wm)
 		log.Printf("Imported %d mappings", len(wm.Mappings))
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
 	}
 
-	// Reset mappings (alternate endpoint)
 	if path == "/__admin/mappings/reset" && method == "POST" {
-		s.ClearMappings()
+		clearMappings(s)
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
 	}
 
-	// Delete requests log - DELETE /__admin/requests
 	if path == "/__admin/requests" && method == "DELETE" {
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
 	}
 
-	// Recordings snapshot (for recording mode - stub implementation)
 	if path == "/__admin/recordings/snapshot" && method == "POST" {
 		ctx.Response.Header.Set("Content-Type", "application/json")
 		ctx.SetStatusCode(fasthttp.StatusOK)
@@ -207,13 +181,11 @@ func (s *Server) handleAdmin(ctx *fasthttp.RequestCtx, path, method string) {
 		return
 	}
 
-	// Unknown admin endpoint
 	log.Printf("Unknown admin endpoint: %s %s", method, path)
 	ctx.SetStatusCode(fasthttp.StatusNotFound)
 }
 
-// handleMappings handles the /__admin/mappings endpoint
-func (s *Server) handleMappings(ctx *fasthttp.RequestCtx, method string) {
+func handleMappings(s *Server, ctx *fasthttp.RequestCtx, method string) {
 	switch method {
 	case "POST":
 		var m Mapping
@@ -223,12 +195,12 @@ func (s *Server) handleMappings(ctx *fasthttp.RequestCtx, method string) {
 			return
 		}
 
-		s.AddMapping(m)
+		addMapping(s, m)
 		log.Printf("Added mapping: %s %s", m.Request.Method, getRequestPattern(&m))
 		ctx.SetStatusCode(fasthttp.StatusCreated)
 
 	case "DELETE":
-		s.ClearMappings()
+		clearMappings(s)
 		ctx.SetStatusCode(fasthttp.StatusOK)
 
 	case "GET":
@@ -245,8 +217,8 @@ func (s *Server) handleMappings(ctx *fasthttp.RequestCtx, method string) {
 	}
 }
 
-// logRequest logs incoming request details when verbose mode is enabled.
-func (s *Server) logRequest(ctx *fasthttp.RequestCtx, method, rawURI string) {
+// logVerboseRequest logs incoming request details when verbose mode is enabled.
+func logVerboseRequest(ctx *fasthttp.RequestCtx, method, rawURI string) {
 	log.Printf("[verbose] >> %s %s", method, rawURI)
 	ctx.Request.Header.VisitAll(func(key, value []byte) {
 		log.Printf("[verbose]    %s: %s", string(key), string(value))

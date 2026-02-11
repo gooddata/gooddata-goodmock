@@ -28,8 +28,8 @@ type RecordedExchange struct {
 
 // RecordServer proxies requests to an upstream backend and records exchanges.
 type RecordServer struct {
-	*Server // embedded for stub matching and admin API
-	mu      sync.Mutex
+	server    *Server
+	mu        sync.Mutex
 	exchanges []RecordedExchange
 	upstream  string
 	client    *fasthttp.Client
@@ -38,15 +38,15 @@ type RecordServer struct {
 // NewRecordServer creates a new recording proxy server.
 func NewRecordServer(upstream, proxyHost, refererPath string, verbose bool) *RecordServer {
 	return &RecordServer{
-		Server:    NewServer(proxyHost, refererPath, verbose),
+		server:    NewServer(proxyHost, refererPath, verbose),
 		exchanges: make([]RecordedExchange, 0),
 		upstream:  upstream,
 		client:    &fasthttp.Client{},
 	}
 }
 
-// HandleRequest routes admin requests locally, checks stubs, then proxies+records.
-func (rs *RecordServer) HandleRequest(ctx *fasthttp.RequestCtx) {
+// handleRecordRequest routes admin requests locally, then proxies+records everything else.
+func handleRecordRequest(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 	rawURI := string(ctx.RequestURI())
 	path := rawURI
 	if idx := strings.IndexByte(rawURI, '?'); idx != -1 {
@@ -56,23 +56,23 @@ func (rs *RecordServer) HandleRequest(ctx *fasthttp.RequestCtx) {
 
 	// Admin endpoints handled locally
 	if strings.HasPrefix(path, "/__admin") {
-		rs.handleRecordAdmin(ctx, path, method)
+		handleRecordAdmin(rs, ctx, path, method)
 		return
 	}
 
-	if rs.Server.verbose {
-		rs.Server.logRequest(ctx, method, rawURI)
+	if rs.server.verbose {
+		logVerboseRequest(ctx, method, rawURI)
 	}
 
 	// Transform request headers before proxying
-	rs.Server.transformRequestHeaders(&ctx.Request.Header)
+	transformRequestHeaders(&ctx.Request.Header, rs.server.proxyHost, rs.server.refererPath)
 
 	// In record mode, always proxy and record — no stub matching
-	rs.proxyAndRecord(ctx)
+	proxyAndRecord(rs, ctx)
 }
 
 // proxyAndRecord forwards the request to upstream, records the exchange, and returns the response.
-func (rs *RecordServer) proxyAndRecord(ctx *fasthttp.RequestCtx) {
+func proxyAndRecord(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 	status, respHeaders, body, err := proxyRequest(rs.client, rs.upstream, ctx)
 	if err != nil {
 		log.Printf("Proxy error: %v", err)
@@ -121,30 +121,28 @@ func (rs *RecordServer) proxyAndRecord(ctx *fasthttp.RequestCtx) {
 	ctx.SetStatusCode(status)
 	ctx.SetBody(body)
 
-	if rs.Server.verbose {
+	if rs.server.verbose {
 		log.Printf("[verbose] << %d %s %s (%d bytes)", status, string(ctx.Method()), string(ctx.RequestURI()), len(body))
 	}
 }
 
-// clearExchanges removes all recorded exchanges.
-func (rs *RecordServer) clearExchanges() {
+func clearExchanges(rs *RecordServer) {
 	rs.mu.Lock()
 	rs.exchanges = make([]RecordedExchange, 0)
 	rs.mu.Unlock()
 }
 
-// handleRecordAdmin handles admin API endpoints in record mode.
-func (rs *RecordServer) handleRecordAdmin(ctx *fasthttp.RequestCtx, path, method string) {
+func handleRecordAdmin(rs *RecordServer, ctx *fasthttp.RequestCtx, path, method string) {
 	// Snapshot is record-mode specific
 	if path == "/__admin/recordings/snapshot" && method == "POST" {
-		rs.handleSnapshot(ctx)
+		handleSnapshot(rs, ctx)
 		return
 	}
 
 	// Reset clears both stubs and recordings
 	if (path == "/__admin/reset" || path == "/__admin/mappings/reset") && method == "POST" {
-		rs.Server.ClearMappings()
-		rs.clearExchanges()
+		clearMappings(rs.server)
+		clearExchanges(rs)
 		log.Println("All mappings and recordings reset")
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
@@ -152,13 +150,13 @@ func (rs *RecordServer) handleRecordAdmin(ctx *fasthttp.RequestCtx, path, method
 
 	// DELETE requests clears recordings
 	if path == "/__admin/requests" && method == "DELETE" {
-		rs.clearExchanges()
+		clearExchanges(rs)
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
 	}
 
 	// Delegate everything else to the replay server's admin handler
-	rs.Server.handleAdmin(ctx, path, method)
+	handleAdmin(rs.server, ctx, path, method)
 }
 
 // SnapshotRequest represents the body of a POST /__admin/recordings/snapshot request.
@@ -170,8 +168,7 @@ type SnapshotRequest struct {
 	RepeatsAsScenarios bool `json:"repeatsAsScenarios"`
 }
 
-// handleSnapshot handles POST /__admin/recordings/snapshot.
-func (rs *RecordServer) handleSnapshot(ctx *fasthttp.RequestCtx) {
+func handleSnapshot(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 	var snapReq SnapshotRequest
 	json.Unmarshal(ctx.PostBody(), &snapReq)
 
@@ -413,8 +410,6 @@ func exchangeToMapping(ex RecordedExchange) Mapping {
 // normalizeHeaderName converts a header name to HTTP canonical form (Title-Case),
 // matching WireMock's header casing behavior.
 func normalizeHeaderName(name string) string {
-	// Use net/http's canonical form: "x-xss-protection" -> "X-Xss-Protection"
-	// Then apply special-case overrides to match WireMock
 	parts := strings.Split(name, "-")
 	for i, part := range parts {
 		if len(part) > 0 {
@@ -550,7 +545,7 @@ func runRecord() {
 	}
 
 	verbose := isVerbose()
-	server := NewRecordServer(upstream, upstream, refererPath, verbose)
+	rs := NewRecordServer(upstream, upstream, refererPath, verbose)
 
 	addr := fmt.Sprintf(":%d", port)
 
@@ -564,5 +559,7 @@ func runRecord() {
 	fmt.Println("|                                                                              |")
 	fmt.Println("└──────────────────────────────────────────────────────────────────────────────┘")
 
-	log.Fatal(fasthttp.ListenAndServe(addr, server.HandleRequest))
+	log.Fatal(fasthttp.ListenAndServe(addr, func(ctx *fasthttp.RequestCtx) {
+		handleRecordRequest(rs, ctx)
+	}))
 }

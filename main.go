@@ -83,7 +83,7 @@ func runReplay() {
 					if err := json.Unmarshal(data, &wm); err != nil {
 						log.Printf("Warning: Could not parse mapping file %s: %v", filePath, err)
 					} else {
-						server.LoadMappings(wm)
+						loadMappings(server, wm)
 						log.Printf("Loaded %d mappings from %s", len(wm.Mappings), filePath)
 					}
 				}
@@ -102,5 +102,7 @@ func runReplay() {
 	fmt.Println("|                                                                              |")
 	fmt.Println("└──────────────────────────────────────────────────────────────────────────────┘")
 
-	log.Fatal(fasthttp.ListenAndServe(addr, server.HandleRequest))
+	log.Fatal(fasthttp.ListenAndServe(addr, func(ctx *fasthttp.RequestCtx) {
+		handleRequest(server, ctx)
+	}))
 }
