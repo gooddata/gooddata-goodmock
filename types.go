@@ -13,11 +13,14 @@ type WiremockMappings struct {
 
 // Mapping represents a single request-response mapping
 type Mapping struct {
-	ID       string   `json:"id,omitempty"`
-	UUID     string   `json:"uuid,omitempty"`
-	Name     string   `json:"name,omitempty"`
-	Request  Request  `json:"request"`
-	Response Response `json:"response"`
+	ID                    string   `json:"id,omitempty"`
+	UUID                  string   `json:"uuid,omitempty"`
+	Name                  string   `json:"name,omitempty"`
+	ScenarioName          string   `json:"scenarioName,omitempty"`
+	RequiredScenarioState string   `json:"requiredScenarioState,omitempty"`
+	NewScenarioState      string   `json:"newScenarioState,omitempty"`
+	Request               Request  `json:"request"`
+	Response              Response `json:"response"`
 }
 
 // Request represents the request matching criteria
@@ -45,8 +48,8 @@ type EqualMatcher struct {
 // BodyPattern represents a request body pattern matcher
 type BodyPattern struct {
 	EqualToJSON         json.RawMessage `json:"equalToJson,omitempty"`
-	IgnoreArrayOrder    bool            `json:"ignoreArrayOrder,omitempty"`
-	IgnoreExtraElements bool            `json:"ignoreExtraElements,omitempty"`
+	IgnoreArrayOrder    *bool           `json:"ignoreArrayOrder,omitempty"`
+	IgnoreExtraElements *bool           `json:"ignoreExtraElements,omitempty"`
 }
 
 // HeaderMatcher represents a header matcher
@@ -69,6 +72,7 @@ type Server struct {
 	mappings    []Mapping
 	proxyHost   string
 	refererPath string
+	verbose     bool
 }
 
 // MatchResult holds the result of matching a request against a stub

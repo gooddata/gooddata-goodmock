@@ -1,10 +1,10 @@
 # GoodMock
 
-A lightweight, high-performance [WireMock](https://wiremock.org/)-compatible HTTP mock server written in Go, powered by [fasthttp](https://github.com/valyala/fasthttp). GoodMock supports **replay only** — it serves pre-defined stub responses from WireMock mapping files but does not record traffic.
+A lightweight, high-performance [WireMock](https://wiremock.org/)-compatible HTTP mock server written in Go, powered by [fasthttp](https://github.com/valyala/fasthttp). GoodMock supports **replay** and **record** modes — it can serve pre-recorded stub responses or proxy traffic to an upstream backend while recording WireMock-compatible mapping files.
 
 ## Features
 
-- WireMock-compatible mapping format and admin API (replay only, no recording)
+- WireMock-compatible mapping format and admin API
 - Request matching by URL, URL path, URL pattern (regex), query parameters, headers, and JSON body
 - Runtime mapping management via `/__admin` endpoints
 - Load mappings from JSON files on startup
@@ -38,18 +38,22 @@ goodmock <mode>
 
 ### Modes
 
-| Mode     | Description                                          |
-|----------|------------------------------------------------------|
-| `replay` | Serve pre-recorded stub responses (default)          |
+| Mode     | Description                                                       |
+|----------|-----------------------------------------------------------------  |
+| `replay` | Serve pre-recorded stub responses (default)                       |
+| `record` | Proxy to upstream and record exchanges as WireMock mappings       |
 
 ### Environment Variables
 
 | Variable       | Default            | Description                                                          |
 |----------------|--------------------|--------------------------------------------------------------------- |
-| `PORT`         | `8080`             | Port to listen on                                                    |
-| `PROXY_HOST`   | `http://localhost` | Proxy host used for Origin and Referer header rewriting              |
-| `REFERER_PATH` | `/`                | App-specific path appended to `PROXY_HOST` for Referer header        |
-| `MAPPINGS_DIR` | _(unset)_          | Directory of JSON mapping files to load on startup                   |
+| Variable       | Default            | Modes          | Description                                              |
+|----------------|--------------------| ---------------|----------------------------------------------------------|
+| `PORT`         | `8080`             | all            | Port to listen on                                        |
+| `PROXY_HOST`   | `http://localhost` | all            | Upstream host (record: proxy target; replay: header rewriting) |
+| `REFERER_PATH` | `/`                | all            | App-specific path appended to `PROXY_HOST` for Referer header |
+| `MAPPINGS_DIR` | _(unset)_          | replay         | Directory of JSON mapping files to load on startup       |
+| `VERBOSE`      | `false`            | all            | Log all request/response traffic (`true`, `1`, or `yes`) |
 
 ### Loading Mappings on Startup
 
@@ -97,8 +101,8 @@ GoodMock exposes a subset of the WireMock admin API under `/__admin`:
 | `POST`   | `/__admin/reset`               | Reset all mappings           |
 | `POST`   | `/__admin/settings`            | Acknowledge settings (no-op) |
 | `POST`   | `/__admin/scenarios/reset`     | Reset scenarios (no-op)      |
-| `DELETE` | `/__admin/requests`            | Clear request log (no-op)    |
-| `POST`   | `/__admin/recordings/snapshot` | Recording snapshot (stub)    |
+| `DELETE` | `/__admin/requests`            | Clear request log / recordings |
+| `POST`   | `/__admin/recordings/snapshot` | Export recorded mappings (record mode) |
 
 ### Adding a Mapping at Runtime
 
@@ -119,6 +123,29 @@ curl -X POST http://localhost:8080/__admin/mappings \
     }
   }'
 ```
+
+## Record Mode
+
+In record mode, GoodMock proxies all requests to the upstream backend (`PROXY_HOST`) and captures request/response pairs. Recorded exchanges can be exported as WireMock-compatible mapping files via the snapshot API.
+
+```bash
+PROXY_HOST=https://my-backend.example.com ./goodmock record
+```
+
+Stubs added via `/__admin/mappings` take priority over proxying (e.g. for mocking log endpoints).
+
+### Exporting Recordings
+
+```bash
+curl -X POST http://localhost:8080/__admin/recordings/snapshot \
+  -H "Content-Type: application/json" \
+  -d '{"persist": false, "repeatsAsScenarios": false}'
+```
+
+The snapshot endpoint supports:
+- `filters.urlPattern` — regex to filter which recordings to include
+- `repeatsAsScenarios` — when `true`, creates scenario-based mappings for repeated URLs
+- `persist` — accepted but ignored (mappings are always returned in the response)
 
 ## Request Header Rewriting
 

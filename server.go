@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 
@@ -10,11 +11,12 @@ import (
 )
 
 // NewServer creates a new mock server
-func NewServer(proxyHost, refererPath string) *Server {
+func NewServer(proxyHost, refererPath string, verbose bool) *Server {
 	return &Server{
 		mappings:    make([]Mapping, 0),
 		proxyHost:   proxyHost,
 		refererPath: refererPath,
+		verbose:     verbose,
 	}
 }
 
@@ -88,6 +90,10 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	if s.verbose {
+		s.logRequest(ctx, method, rawURI)
+	}
+
 	// Rewrite request headers to match recorded stubs
 	s.transformRequestHeaders(&ctx.Request.Header)
 
@@ -115,6 +121,10 @@ func (s *Server) HandleRequest(ctx *fasthttp.RequestCtx) {
 	ctx.SetStatusCode(m.Response.Status)
 	if m.Response.Body != "" {
 		ctx.SetBodyString(m.Response.Body)
+	}
+
+	if s.verbose {
+		log.Printf("[verbose] << %d %s", m.Response.Status, method+" "+rawURI)
 	}
 }
 
@@ -232,6 +242,21 @@ func (s *Server) handleMappings(ctx *fasthttp.RequestCtx, method string) {
 
 	default:
 		ctx.SetStatusCode(fasthttp.StatusMethodNotAllowed)
+	}
+}
+
+// logRequest logs incoming request details when verbose mode is enabled.
+func (s *Server) logRequest(ctx *fasthttp.RequestCtx, method, rawURI string) {
+	log.Printf("[verbose] >> %s %s", method, rawURI)
+	ctx.Request.Header.VisitAll(func(key, value []byte) {
+		log.Printf("[verbose]    %s: %s", string(key), string(value))
+	})
+	if body := ctx.PostBody(); len(body) > 0 {
+		bodyStr := string(body)
+		if len(bodyStr) > 1000 {
+			bodyStr = bodyStr[:1000] + fmt.Sprintf("... (%d bytes total)", len(body))
+		}
+		log.Printf("[verbose]    Body: %s", bodyStr)
 	}
 }
 

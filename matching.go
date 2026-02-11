@@ -11,44 +11,57 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// matchRequest finds a matching stub for the incoming request
+// matchRequest finds the best matching stub for the incoming request.
+// When multiple mappings match, returns the most specific one (most query params + body patterns + headers).
 func (s *Server) matchRequest(method, path, fullURI string, queryArgs *fasthttp.Args, body []byte, reqHeaders *fasthttp.RequestHeader) MatchResult {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var bestMatch MatchResult
 	var bestScore int
+	bestMatched := false
 
 	for i := range s.mappings {
 		m := &s.mappings[i]
 		result := s.evaluateMapping(m, method, path, fullURI, queryArgs, body, reqHeaders)
 
-		score := 0
-		if result.MethodMatch {
-			score += 1
-		}
-		if result.URLMatch {
-			score += 2
-		}
-		if result.QueryMatch {
-			score += 4
-		}
-		if result.BodyMatch {
-			score += 8
-		}
-		if result.HeaderMatch {
-			score += 16
-		}
-
 		if result.Matched {
-			result.Mapping = m
-			return result
-		}
+			// Calculate specificity: more criteria = more specific
+			specificity := len(m.Request.QueryParameters) + len(m.Request.BodyPatterns) + len(m.Request.Headers)
+			// URL exact match (includes query string) is more specific than urlPath
+			if m.Request.URL != "" {
+				specificity += 100
+			}
 
-		if score > bestScore {
-			bestScore = score
-			bestMatch = result
-			bestMatch.Mapping = m
+			if !bestMatched || specificity > bestScore {
+				bestMatched = true
+				bestScore = specificity
+				bestMatch = result
+				bestMatch.Mapping = m
+			}
+		} else if !bestMatched {
+			// Track closest non-match for diagnostics
+			score := 0
+			if result.MethodMatch {
+				score += 1
+			}
+			if result.URLMatch {
+				score += 2
+			}
+			if result.QueryMatch {
+				score += 4
+			}
+			if result.BodyMatch {
+				score += 8
+			}
+			if result.HeaderMatch {
+				score += 16
+			}
+			if score > bestScore {
+				bestScore = score
+				bestMatch = result
+				bestMatch.Mapping = m
+			}
 		}
 	}
 
