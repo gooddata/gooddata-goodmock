@@ -38,6 +38,7 @@ func main() {
 
 func runReplay() {
 	port := common.GetPort()
+	const maxRequestBodySize = 16 * 1024 * 1024
 
 	proxyHost := os.Getenv("PROXY_HOST")
 	if proxyHost == "" {
@@ -90,10 +91,18 @@ func runReplay() {
 	fmt.Printf("|   Mode: %-69s|\n", "replay")
 	fmt.Printf("|   Port: %-69d|\n", port)
 	fmt.Printf("|   Verbose: %-66v|\n", verbose)
+	fmt.Printf("|   Max Request Body: %-57s|\n", fmt.Sprintf("%d bytes", maxRequestBodySize))
 	fmt.Println("|                                                                              |")
 	fmt.Println("└──────────────────────────────────────────────────────────────────────────────┘")
 
-	log.Fatal(fasthttp.ListenAndServe(addr, func(ctx *fasthttp.RequestCtx) {
-		server.HandleRequest(s, ctx)
-	}))
+	httpServer := &fasthttp.Server{
+		Handler:            func(ctx *fasthttp.RequestCtx) { server.HandleRequest(s, ctx) },
+		MaxRequestBodySize: maxRequestBodySize,
+		ErrorHandler: func(ctx *fasthttp.RequestCtx, err error) {
+			ctx.SetStatusCode(fasthttp.StatusBadRequest)
+			ctx.SetBodyString(err.Error())
+		},
+	}
+
+	log.Fatal(httpServer.ListenAndServe(addr))
 }

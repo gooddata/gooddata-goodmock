@@ -89,6 +89,7 @@ func forwardAndRespond(ps *ProxyServer, ctx *fasthttp.RequestCtx) {
 
 func RunProxy() {
 	port := common.GetPort()
+	const maxRequestBodySize = 16 * 1024 * 1024
 
 	upstream := os.Getenv("PROXY_HOST")
 	if upstream == "" {
@@ -113,10 +114,18 @@ func RunProxy() {
 	fmt.Printf("|   Port: %-69d|\n", port)
 	fmt.Printf("|   Upstream: %-66s|\n", upstream)
 	fmt.Printf("|   Verbose: %-66v|\n", verbose)
+	fmt.Printf("|   Max Request Body: %-57s|\n", fmt.Sprintf("%d bytes", maxRequestBodySize))
 	fmt.Println("|                                                                              |")
 	fmt.Println("└──────────────────────────────────────────────────────────────────────────────┘")
 
-	log.Fatal(fasthttp.ListenAndServe(addr, func(ctx *fasthttp.RequestCtx) {
-		handleProxyRequest(ps, ctx)
-	}))
+	httpServer := &fasthttp.Server{
+		Handler:            func(ctx *fasthttp.RequestCtx) { handleProxyRequest(ps, ctx) },
+		MaxRequestBodySize: maxRequestBodySize,
+		ErrorHandler: func(ctx *fasthttp.RequestCtx, err error) {
+			ctx.SetStatusCode(fasthttp.StatusBadRequest)
+			ctx.SetBodyString(err.Error())
+		},
+	}
+
+	log.Fatal(httpServer.ListenAndServe(addr))
 }
