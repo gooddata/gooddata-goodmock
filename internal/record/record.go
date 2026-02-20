@@ -610,6 +610,7 @@ func compileURLMatcher(pattern string) func(string) bool {
 
 func RunRecord() {
 	port := common.GetPort()
+	const maxRequestBodySize = 16 * 1024 * 1024
 
 	upstream := os.Getenv("PROXY_HOST")
 	if upstream == "" {
@@ -637,10 +638,18 @@ func RunRecord() {
 	fmt.Printf("|   Port: %-69d|\n", port)
 	fmt.Printf("|   Upstream: %-66s|\n", upstream)
 	fmt.Printf("|   Verbose: %-66v|\n", verbose)
+	fmt.Printf("|   Max Request Body: %-57s|\n", fmt.Sprintf("%d bytes", maxRequestBodySize))
 	fmt.Println("|                                                                              |")
 	fmt.Println("└──────────────────────────────────────────────────────────────────────────────┘")
 
-	log.Fatal(fasthttp.ListenAndServe(addr, func(ctx *fasthttp.RequestCtx) {
-		handleRecordRequest(rs, ctx)
-	}))
+	httpServer := &fasthttp.Server{
+		Handler:            func(ctx *fasthttp.RequestCtx) { handleRecordRequest(rs, ctx) },
+		MaxRequestBodySize: maxRequestBodySize,
+		ErrorHandler: func(ctx *fasthttp.RequestCtx, err error) {
+			ctx.SetStatusCode(fasthttp.StatusBadRequest)
+			ctx.SetBodyString(err.Error())
+		},
+	}
+
+	log.Fatal(httpServer.ListenAndServe(addr))
 }
