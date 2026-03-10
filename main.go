@@ -51,7 +51,8 @@ func runReplay() {
 	}
 
 	verbose := common.IsVerbose()
-	s := server.NewServer(proxyHost, refererPath, verbose)
+	binaryContentTypes := common.ParseBinaryContentTypes()
+	s := server.NewServer(proxyHost, refererPath, verbose, binaryContentTypes)
 
 	// Load mappings from MAPPINGS_DIR env if set
 	mappingsDir := os.Getenv("MAPPINGS_DIR")

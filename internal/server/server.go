@@ -2,6 +2,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"goodmock/internal/logging"
@@ -14,12 +15,13 @@ import (
 )
 
 // NewServer creates a new mock server
-func NewServer(proxyHost, refererPath string, verbose bool) *types.Server {
+func NewServer(proxyHost, refererPath string, verbose bool, binaryContentTypes []string) *types.Server {
 	return &types.Server{
-		Mappings:    make([]types.Mapping, 0),
-		ProxyHost:   proxyHost,
-		RefererPath: refererPath,
-		Verbose:     verbose,
+		Mappings:           make([]types.Mapping, 0),
+		ProxyHost:          proxyHost,
+		RefererPath:        refererPath,
+		Verbose:            verbose,
+		BinaryContentTypes: binaryContentTypes,
 	}
 }
 
@@ -113,7 +115,16 @@ func HandleRequest(s *types.Server, ctx *fasthttp.RequestCtx) {
 			ctx.SetBody(data)
 		}
 	} else if m.Response.Body != "" {
-		ctx.SetBodyString(m.Response.Body)
+		if isBinaryResponse(m.Response.Headers, s.BinaryContentTypes) {
+			decoded, err := base64.StdEncoding.DecodeString(m.Response.Body)
+			if err == nil {
+				ctx.SetBody(decoded)
+			} else {
+				ctx.SetBodyString(m.Response.Body)
+			}
+		} else {
+			ctx.SetBodyString(m.Response.Body)
+		}
 	}
 
 	if s.Verbose {
@@ -238,6 +249,38 @@ func LogVerboseRequest(ctx *fasthttp.RequestCtx, method, rawURI string) {
 		}
 		log.Printf("[verbose]    Body: %s", bodyStr)
 	}
+}
+
+// isBinaryResponse checks if the response Content-Type matches any of the given binary types.
+func isBinaryResponse(headers map[string]any, binaryTypes []string) bool {
+	if len(binaryTypes) == 0 {
+		return false
+	}
+	for key, value := range headers {
+		if !strings.EqualFold(key, "Content-Type") {
+			continue
+		}
+		var ct string
+		switch v := value.(type) {
+		case string:
+			ct = v
+		case []interface{}:
+			if len(v) > 0 {
+				if s, ok := v[0].(string); ok {
+					ct = s
+				}
+			}
+		}
+		if ct != "" {
+			mediaType := strings.TrimSpace(strings.SplitN(ct, ";", 2)[0])
+			for _, bt := range binaryTypes {
+				if strings.EqualFold(mediaType, bt) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func getRequestPattern(m *types.Mapping) string {

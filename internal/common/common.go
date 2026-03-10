@@ -47,3 +47,18 @@ func ParseJSONContentTypes() []string {
 	}
 	return types
 }
+
+// ParseBinaryContentTypes returns the list of Content-Types whose response bodies
+// should be stored as base64-encoded strings. Empty by default.
+func ParseBinaryContentTypes() []string {
+	var types []string
+	if env := os.Getenv("BINARY_CONTENT_TYPES"); env != "" {
+		for _, t := range strings.Split(env, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				types = append(types, t)
+			}
+		}
+	}
+	return types
+}

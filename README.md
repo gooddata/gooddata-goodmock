@@ -54,6 +54,7 @@ goodmock <mode>
 | `MAPPINGS_DIR`            | _(unset)_          | replay | Directory of JSON mapping files to load on startup                                                    |
 | `VERBOSE`                 | _(unset)_          | all    | Log all request/response traffic (any value enables)                                                  |
 | `JSON_CONTENT_TYPES`      | _(unset)_          | record | Additional Content-Types to store as structured JSON (see below)                                      |
+| `BINARY_CONTENT_TYPES`    | _(unset)_          | record | Content-Types to store as base64-encoded strings (comma-separated)                                    |
 | `PRESERVE_JSON_KEY_ORDER` | _(unset)_          | record | Preserve original key order in JSON request and response bodies (any value enables)                   |
 | `SORT_ARRAY_MEMBERS`      | _(unset)_          | record | Recursively sort JSON array elements by stringified value for deterministic diffs (any value enables) |
 

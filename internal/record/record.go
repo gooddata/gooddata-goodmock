@@ -3,6 +3,7 @@ package record
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"goodmock/internal/common"
@@ -33,26 +34,28 @@ type RecordedExchange struct {
 
 // RecordServer proxies requests to an upstream backend and records exchanges.
 type RecordServer struct {
-	server           *types.Server
-	mu               sync.Mutex
-	exchanges        []RecordedExchange
-	upstream         string
-	client           *fasthttp.Client
-	jsonContentTypes []string
-	preserveKeyOrder bool
-	sortArrayMembers bool
+	server             *types.Server
+	mu                 sync.Mutex
+	exchanges          []RecordedExchange
+	upstream           string
+	client             *fasthttp.Client
+	jsonContentTypes   []string
+	binaryContentTypes []string
+	preserveKeyOrder   bool
+	sortArrayMembers   bool
 }
 
 // NewRecordServer creates a new recording proxy server.
-func NewRecordServer(upstream, proxyHost, refererPath string, verbose bool, jsonContentTypes []string, preserveKeyOrder, sortArrayMembers bool) *RecordServer {
+func NewRecordServer(upstream, proxyHost, refererPath string, verbose bool, jsonContentTypes, binaryContentTypes []string, preserveKeyOrder, sortArrayMembers bool) *RecordServer {
 	return &RecordServer{
-		server:           server.NewServer(proxyHost, refererPath, verbose),
-		exchanges:        make([]RecordedExchange, 0),
-		upstream:         upstream,
-		client:           &fasthttp.Client{},
-		jsonContentTypes: jsonContentTypes,
-		preserveKeyOrder: preserveKeyOrder,
-		sortArrayMembers: sortArrayMembers,
+		server:             server.NewServer(proxyHost, refererPath, verbose, nil),
+		exchanges:          make([]RecordedExchange, 0),
+		upstream:           upstream,
+		client:             &fasthttp.Client{},
+		jsonContentTypes:   jsonContentTypes,
+		binaryContentTypes: binaryContentTypes,
+		preserveKeyOrder:   preserveKeyOrder,
+		sortArrayMembers:   sortArrayMembers,
 	}
 }
 
@@ -208,11 +211,11 @@ func handleSnapshot(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 	// as [] not null (Cypress spreads this array and null is not iterable)
 	mappings := make([]types.Mapping, 0)
 	if snapReq.RepeatsAsScenarios {
-		if m := exchangesToScenarioMappings(filtered, rs.jsonContentTypes, rs.preserveKeyOrder, rs.sortArrayMembers); m != nil {
+		if m := exchangesToScenarioMappings(filtered, rs.jsonContentTypes, rs.binaryContentTypes, rs.preserveKeyOrder, rs.sortArrayMembers); m != nil {
 			mappings = m
 		}
 	} else {
-		if m := exchangesToMappings(filtered, rs.jsonContentTypes, rs.preserveKeyOrder, rs.sortArrayMembers); m != nil {
+		if m := exchangesToMappings(filtered, rs.jsonContentTypes, rs.binaryContentTypes, rs.preserveKeyOrder, rs.sortArrayMembers); m != nil {
 			mappings = m
 		}
 	}
@@ -230,7 +233,7 @@ func handleSnapshot(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 // exchangesToMappings converts exchanges to mappings, deduplicating by
 // method + path + query params + body (keeping the last occurrence).
 // This matches WireMock's snapshot behavior with repeatsAsScenarios=false.
-func exchangesToMappings(exchanges []RecordedExchange, jsonContentTypes []string, preserveKeyOrder, sortArrayMembers bool) []types.Mapping {
+func exchangesToMappings(exchanges []RecordedExchange, jsonContentTypes, binaryContentTypes []string, preserveKeyOrder, sortArrayMembers bool) []types.Mapping {
 	type dedupEntry struct {
 		key     string
 		mapping types.Mapping
@@ -240,7 +243,7 @@ func exchangesToMappings(exchanges []RecordedExchange, jsonContentTypes []string
 	var entries []dedupEntry
 
 	for _, ex := range exchanges {
-		m := exchangeToMapping(ex, jsonContentTypes, preserveKeyOrder, sortArrayMembers)
+		m := exchangeToMapping(ex, jsonContentTypes, binaryContentTypes, preserveKeyOrder, sortArrayMembers)
 		key := deduplicationKey(m)
 
 		if idx, exists := seen[key]; exists {
@@ -286,7 +289,7 @@ func deduplicationKey(m types.Mapping) string {
 }
 
 // exchangesToScenarioMappings converts exchanges to mappings, creating scenarios for repeated URLs.
-func exchangesToScenarioMappings(exchanges []RecordedExchange, jsonContentTypes []string, preserveKeyOrder, sortArrayMembers bool) []types.Mapping {
+func exchangesToScenarioMappings(exchanges []RecordedExchange, jsonContentTypes, binaryContentTypes []string, preserveKeyOrder, sortArrayMembers bool) []types.Mapping {
 	// Group by URL+method
 	type group struct {
 		key       string
@@ -311,12 +314,12 @@ func exchangesToScenarioMappings(exchanges []RecordedExchange, jsonContentTypes 
 		g := groups[key]
 		if len(g.exchanges) == 1 {
 			// Single occurrence — no scenario needed
-			mappings = append(mappings, exchangeToMapping(g.exchanges[0], jsonContentTypes, preserveKeyOrder, sortArrayMembers))
+			mappings = append(mappings, exchangeToMapping(g.exchanges[0], jsonContentTypes, binaryContentTypes, preserveKeyOrder, sortArrayMembers))
 		} else {
 			// Multiple occurrences — create scenario chain
 			scenarioName := generateMappingName(g.exchanges[0].URL)
 			for i, ex := range g.exchanges {
-				m := exchangeToMapping(ex, jsonContentTypes, preserveKeyOrder, sortArrayMembers)
+				m := exchangeToMapping(ex, jsonContentTypes, binaryContentTypes, preserveKeyOrder, sortArrayMembers)
 				m.ScenarioName = scenarioName
 				if i == 0 {
 					m.RequiredScenarioState = "Started"
@@ -346,7 +349,7 @@ func sortMappings(mappings []types.Mapping) {
 }
 
 // exchangeToMapping converts a recorded exchange to a WireMock mapping.
-func exchangeToMapping(ex RecordedExchange, jsonContentTypes []string, preserveKeyOrder, sortArrayMembers bool) types.Mapping {
+func exchangeToMapping(ex RecordedExchange, jsonContentTypes, binaryContentTypes []string, preserveKeyOrder, sortArrayMembers bool) types.Mapping {
 	// Split URL into path and query parameters
 	rawPath := ex.URL
 	var queryString string
@@ -443,8 +446,10 @@ func exchangeToMapping(ex RecordedExchange, jsonContentTypes []string, preserveK
 		Headers: headers,
 	}
 
-	// Store as structured JSON if Content-Type matches, otherwise as string
-	if isJSONContentType(ex.RespHeaders, jsonContentTypes) {
+	// Store as base64 if binary Content-Type, structured JSON if JSON Content-Type, otherwise as string
+	if isContentType(ex.RespHeaders, binaryContentTypes) {
+		resp.Body = base64.StdEncoding.EncodeToString(ex.RespBody)
+	} else if isJSONContentType(ex.RespHeaders, jsonContentTypes) {
 		if preserveKeyOrder && !sortArrayMembers {
 			// Use json.RawMessage to preserve original key order from upstream
 			var raw json.RawMessage
@@ -476,22 +481,30 @@ func exchangeToMapping(ex RecordedExchange, jsonContentTypes []string, preserveK
 	}
 }
 
-// isJSONContentType checks if the response Content-Type matches any of the given JSON types.
-func isJSONContentType(headers map[string][]string, jsonTypes []string) bool {
+// isContentType checks if the response Content-Type matches any of the given types.
+func isContentType(headers map[string][]string, contentTypes []string) bool {
+	if len(contentTypes) == 0 {
+		return false
+	}
 	for key, values := range headers {
 		if !strings.EqualFold(key, "Content-Type") {
 			continue
 		}
 		for _, v := range values {
 			mediaType := strings.TrimSpace(strings.SplitN(v, ";", 2)[0])
-			for _, jt := range jsonTypes {
-				if strings.EqualFold(mediaType, jt) {
+			for _, ct := range contentTypes {
+				if strings.EqualFold(mediaType, ct) {
 					return true
 				}
 			}
 		}
 	}
 	return false
+}
+
+// isJSONContentType checks if the response Content-Type matches any of the given JSON types.
+func isJSONContentType(headers map[string][]string, jsonTypes []string) bool {
+	return isContentType(headers, jsonTypes)
 }
 
 // normalizeHeaderName converts a header name to HTTP canonical form (Title-Case),
@@ -625,9 +638,10 @@ func RunRecord() {
 
 	verbose := common.IsVerbose()
 	jsonContentTypes := common.ParseJSONContentTypes()
+	binaryContentTypes := common.ParseBinaryContentTypes()
 	preserveKeyOrder := common.PreserveJSONKeyOrder()
 	sortArrayMembers := common.SortArrayMembers()
-	rs := NewRecordServer(upstream, upstream, refererPath, verbose, jsonContentTypes, preserveKeyOrder, sortArrayMembers)
+	rs := NewRecordServer(upstream, upstream, refererPath, verbose, jsonContentTypes, binaryContentTypes, preserveKeyOrder, sortArrayMembers)
 
 	addr := fmt.Sprintf(":%d", port)
 
