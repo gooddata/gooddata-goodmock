@@ -23,7 +23,7 @@ type ProxyServer struct {
 
 func NewProxyServer(upstream, proxyHost, refererPath string, verbose bool) *ProxyServer {
 	return &ProxyServer{
-		server:   server.NewServer(proxyHost, refererPath, verbose),
+		server:   server.NewServer(proxyHost, refererPath, verbose, nil),
 		upstream: upstream,
 		client:   &fasthttp.Client{},
 	}
