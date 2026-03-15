@@ -11,13 +11,30 @@ A lightweight, high-performance mock server written in Go, powered by [fasthttp]
 - Detailed mismatch logging (WireMock-style diagnostics)
 - Minimal Docker image (built from `scratch`)
 
-## Installation
+## Install
+
+```bash
+# latest version
+curl -fsSL https://raw.githubusercontent.com/gooddata/gooddata-goodmock/master/install.sh | sh
+
+# specific version
+curl -fsSL https://raw.githubusercontent.com/gooddata/gooddata-goodmock/master/install.sh | sh -s v0.9.0
+
+# custom install directory
+curl -fsSL https://raw.githubusercontent.com/gooddata/gooddata-goodmock/master/install.sh | BINDIR=~/.local/bin sh
+```
+
+Or run locally:
+
+```bash
+BINDIR=~/.local/bin ./install.sh v0.9.0
+```
 
 ### Docker
 
 ```bash
-docker build -t goodmock .
-docker run -p 8080:8080 goodmock
+docker pull gooddata/gooddata-goodmock:latest
+docker run -p 8080:8080 gooddata/gooddata-goodmock:latest
 ```
 
 ### Building from Source
@@ -32,8 +49,10 @@ go build -o goodmock .
 
 ## Usage
 
-```
+```bash
 goodmock <mode>
+goodmock -v           # print version
+goodmock --version    # print version
 ```
 
 ### Modes
