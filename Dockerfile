@@ -13,7 +13,7 @@ RUN go mod download
 COPY . .
 
 # Build the Go application
-RUN CGO_ENABLED=0 GOOS=linux go build -o goodmock .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o goodmock .
 
 FROM scratch
 WORKDIR /
