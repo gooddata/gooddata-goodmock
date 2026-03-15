@@ -2,6 +2,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"goodmock/internal/common"
@@ -16,7 +17,18 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+//go:embed VERSION
+var version string
+
 func main() {
+	for _, arg := range os.Args[1:] {
+		if arg == "-v" || arg == "--version" {
+			fmt.Print(strings.TrimSpace(version))
+			fmt.Println()
+			os.Exit(0)
+		}
+	}
+
 	// First arg is the mode (default: replay)
 	mode := "replay"
 	if len(os.Args) > 1 {
