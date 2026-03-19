@@ -39,7 +39,7 @@ func handleProxyRequest(ps *ProxyServer, ctx *fasthttp.RequestCtx) {
 
 	// Admin endpoints handled locally
 	if strings.HasPrefix(path, "/__admin") {
-		server.HandleAdmin(ps.server, ctx, path, method)
+		server.HandleAdmin(ctx, path, method)
 		return
 	}
 
