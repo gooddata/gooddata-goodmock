@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-03-18
+
+### Changed
+- Moved replay mode into its own `internal/replay` package, matching the pattern of `record` and `pureproxy`
+- Each mode now has its own admin handler (`handleReplayAdmin`, `handleRecordAdmin`) — admin endpoints are scoped to the mode where they make sense instead of sharing a single catch-all handler
+- Mapping-related admin endpoints (`/__admin/mappings`, `/__admin/mappings/import`, `/__admin/mappings/reset`, `/__admin/reset`) are now replay-mode only — record and proxy modes no longer silently accept mapping operations that have no effect
+- `/__admin/recordings/snapshot` is now record-mode only — replay and proxy modes return 404 instead of an empty response
+- `/__admin/scenarios/reset` now returns 501 (was a silent no-op returning 200)
+- `/__admin/settings` now returns 501 (was a silent no-op returning 200)
+- `DELETE /__admin/requests` now returns 501 in replay/proxy modes (record mode still clears exchanges)
+- Record mode `/__admin/reset` no longer calls `ClearMappings` (mappings are never loaded in record mode)
+
 ## [0.9.0] - 2026-03-15
 
 ### Added
@@ -107,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
+[0.10.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.6.0...v0.7.0

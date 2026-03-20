@@ -153,11 +153,10 @@ func handleRecordAdmin(rs *RecordServer, ctx *fasthttp.RequestCtx, path, method 
 		return
 	}
 
-	// Reset clears both stubs and recordings
+	// Reset clears recordings
 	if (path == "/__admin/reset" || path == "/__admin/mappings/reset") && method == "POST" {
-		server.ClearMappings(rs.server)
 		clearExchanges(rs)
-		log.Println("All mappings and recordings reset")
+		log.Println("All recordings reset")
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
 	}
@@ -169,8 +168,8 @@ func handleRecordAdmin(rs *RecordServer, ctx *fasthttp.RequestCtx, path, method 
 		return
 	}
 
-	// Delegate everything else to the replay server's admin handler
-	server.HandleAdmin(rs.server, ctx, path, method)
+	// Delegate everything else to the server's common admin handler
+	server.HandleAdmin(ctx, path, method)
 }
 
 // SnapshotRequest represents the body of a POST /__admin/recordings/snapshot request.
