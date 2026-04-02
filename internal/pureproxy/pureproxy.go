@@ -66,7 +66,10 @@ func forwardAndRespond(ps *ProxyServer, ctx *fasthttp.RequestCtx) {
 	// Send response back to client, filtering headers
 	for key, values := range respHeaders {
 		upperKey := strings.ToUpper(key)
-		if strings.HasPrefix(upperKey, "X-GDC") || upperKey == "DATE" {
+		if upperKey == "DATE" {
+			continue
+		}
+		if strings.HasPrefix(upperKey, "X-GDC") && upperKey != "X-GDC-TRACE-ID" {
 			continue
 		}
 		if upperKey == "CONTENT-ENCODING" {
