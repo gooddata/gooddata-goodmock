@@ -36,7 +36,8 @@ type RecordedExchange struct {
 type RecordServer struct {
 	server             *types.Server
 	mu                 sync.Mutex
-	exchanges          []RecordedExchange
+	exchangeBuckets    map[string][]RecordedExchange
+	currentBucket      string
 	upstream           string
 	client             *proxy.Client
 	jsonContentTypes   []string
@@ -49,7 +50,8 @@ type RecordServer struct {
 func NewRecordServer(upstream, proxyHost, refererPath string, verbose bool, jsonContentTypes, binaryContentTypes []string, preserveKeyOrder, sortArrayMembers bool) *RecordServer {
 	return &RecordServer{
 		server:             server.NewServer(proxyHost, refererPath, verbose, nil),
-		exchanges:          make([]RecordedExchange, 0),
+		exchangeBuckets:    map[string][]RecordedExchange{},
+		currentBucket:      "default",
 		upstream:           upstream,
 		client:             proxy.NewClient(),
 		jsonContentTypes:   jsonContentTypes,
@@ -57,6 +59,52 @@ func NewRecordServer(upstream, proxyHost, refererPath string, verbose bool, json
 		preserveKeyOrder:   preserveKeyOrder,
 		sortArrayMembers:   sortArrayMembers,
 	}
+}
+
+// bucketHeader lets a single proxied request target a specific recording bucket,
+// overriding the current cursor bucket. Stripped before the request is proxied upstream.
+const bucketHeader = "X-GOODMOCK-BUCKET"
+
+// currentBucketName returns the current cursor bucket under lock.
+func currentBucketName(rs *RecordServer) string {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	return rs.currentBucket
+}
+
+// setCurrentBucket updates the cursor bucket used when no bucket is given explicitly.
+func setCurrentBucket(rs *RecordServer, name string) {
+	rs.mu.Lock()
+	rs.currentBucket = name
+	rs.mu.Unlock()
+}
+
+// resolveBucket returns explicit when non-empty, otherwise the current cursor bucket.
+func resolveBucket(rs *RecordServer, explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	return currentBucketName(rs)
+}
+
+// isPathOrSub reports whether path equals prefix or is a sub-path (prefix + "/...").
+func isPathOrSub(path, prefix string) bool {
+	return path == prefix || strings.HasPrefix(path, prefix+"/")
+}
+
+// bucketFromPath returns the trailing segment after prefix, or "" if there is none.
+func bucketFromPath(path, prefix string) string {
+	if strings.HasPrefix(path, prefix+"/") {
+		return strings.TrimPrefix(path, prefix+"/")
+	}
+	return ""
+}
+
+// adminBucket resolves the bucket for an admin op: explicit path param wins,
+// otherwise the current cursor bucket. The X-GOODMOCK-BUCKET header is only
+// honored on proxied (recorded) requests, never on admin endpoints.
+func adminBucket(rs *RecordServer, path, prefix string) string {
+	return resolveBucket(rs, bucketFromPath(path, prefix))
 }
 
 // handleRecordRequest routes admin requests locally, then proxies+records everything else.
@@ -87,6 +135,11 @@ func handleRecordRequest(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 
 // proxyAndRecord forwards the request to upstream, records the exchange, and returns the response.
 func proxyAndRecord(rs *RecordServer, ctx *fasthttp.RequestCtx) {
+	// Resolve the target bucket from the X-GOODMOCK-BUCKET header (falling back to the
+	// current cursor bucket), then strip the header so it never reaches the upstream.
+	bucket := resolveBucket(rs, string(ctx.Request.Header.Peek(bucketHeader)))
+	ctx.Request.Header.Del(bucketHeader)
+
 	status, respHeaders, body, err := proxy.ProxyRequest(rs.client, rs.upstream, ctx)
 	if err != nil {
 		log.Printf("Proxy error: %v", err)
@@ -111,7 +164,7 @@ func proxyAndRecord(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 	}
 
 	rs.mu.Lock()
-	rs.exchanges = append(rs.exchanges, exchange)
+	rs.exchangeBuckets[bucket] = append(rs.exchangeBuckets[bucket], exchange)
 	rs.mu.Unlock()
 
 	// Send response back to client, filtering headers
@@ -143,36 +196,72 @@ func proxyAndRecord(rs *RecordServer, ctx *fasthttp.RequestCtx) {
 	}
 }
 
-func clearExchanges(rs *RecordServer) {
+func clearExchanges(rs *RecordServer, bucket string) {
 	rs.mu.Lock()
-	rs.exchanges = make([]RecordedExchange, 0)
+	delete(rs.exchangeBuckets, bucket)
 	rs.mu.Unlock()
 }
 
 func handleRecordAdmin(rs *RecordServer, ctx *fasthttp.RequestCtx, path, method string) {
-	// Snapshot is record-mode specific
-	if path == "/__admin/recordings/snapshot" && method == "POST" {
-		handleSnapshot(rs, ctx)
+	// Set the current cursor bucket: POST /__admin/mappings/bucket[/{name}]
+	if method == "POST" && isPathOrSub(path, "/__admin/mappings/bucket") {
+		handleSetBucket(rs, ctx, path)
 		return
 	}
 
-	// Reset clears recordings
-	if (path == "/__admin/reset" || path == "/__admin/mappings/reset") && method == "POST" {
-		clearExchanges(rs)
-		log.Println("All recordings reset")
+	// Snapshot is record-mode specific: POST /__admin/recordings/snapshot[/{bucket}]
+	if method == "POST" && isPathOrSub(path, "/__admin/recordings/snapshot") {
+		bucket := adminBucket(rs, path, "/__admin/recordings/snapshot")
+		handleSnapshot(rs, ctx, bucket)
+		return
+	}
+
+	// Reset clears a bucket's recordings: POST /__admin/reset[/{bucket}] or /__admin/mappings/reset[/{bucket}]
+	if method == "POST" && (isPathOrSub(path, "/__admin/mappings/reset") || isPathOrSub(path, "/__admin/reset")) {
+		prefix := "/__admin/reset"
+		if isPathOrSub(path, "/__admin/mappings/reset") {
+			prefix = "/__admin/mappings/reset"
+		}
+		bucket := adminBucket(rs, path, prefix)
+		clearExchanges(rs, bucket)
+		log.Printf("Recordings reset for bucket %q", bucket)
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
 	}
 
-	// DELETE requests clears recordings
-	if path == "/__admin/requests" && method == "DELETE" {
-		clearExchanges(rs)
+	// DELETE requests clears a bucket's recordings: DELETE /__admin/requests[/{bucket}]
+	if method == "DELETE" && isPathOrSub(path, "/__admin/requests") {
+		bucket := adminBucket(rs, path, "/__admin/requests")
+		clearExchanges(rs, bucket)
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
 	}
 
 	// Delegate everything else to the server's common admin handler
 	server.HandleAdmin(ctx, path, method)
+}
+
+// handleSetBucket sets the current cursor bucket from the path segment
+// (POST /__admin/mappings/bucket/{name}) or a JSON body {"bucket": "..."}.
+func handleSetBucket(rs *RecordServer, ctx *fasthttp.RequestCtx, path string) {
+	name := bucketFromPath(path, "/__admin/mappings/bucket")
+	if name == "" {
+		var body struct {
+			Bucket string `json:"bucket"`
+		}
+		json.Unmarshal(ctx.PostBody(), &body)
+		name = body.Bucket
+	}
+	if name == "" {
+		ctx.SetStatusCode(fasthttp.StatusBadRequest)
+		ctx.SetBodyString(`{"error": "bucket name required"}`)
+		return
+	}
+	setCurrentBucket(rs, name)
+	log.Printf("Current bucket set to %q", name)
+	ctx.Response.Header.Set("Content-Type", "application/json")
+	ctx.SetStatusCode(fasthttp.StatusOK)
+	ctx.SetBodyString(fmt.Sprintf(`{"bucket": %q}`, name))
 }
 
 // SnapshotRequest represents the body of a POST /__admin/recordings/snapshot request.
@@ -184,28 +273,29 @@ type SnapshotRequest struct {
 	RepeatsAsScenarios bool `json:"repeatsAsScenarios"`
 }
 
-func handleSnapshot(rs *RecordServer, ctx *fasthttp.RequestCtx) {
+func handleSnapshot(rs *RecordServer, ctx *fasthttp.RequestCtx, bucket string) {
 	var snapReq SnapshotRequest
 	json.Unmarshal(ctx.PostBody(), &snapReq)
 
 	rs.mu.Lock()
-	// Filter by URL pattern and remove matched exchanges from the pool
+	// Filter by URL pattern and remove matched exchanges from the bucket
+	exchanges := rs.exchangeBuckets[bucket]
 	var filtered []RecordedExchange
 	var remaining []RecordedExchange
 	if snapReq.Filters.URLPattern != "" {
 		matcher := compileURLMatcher(snapReq.Filters.URLPattern)
-		for _, ex := range rs.exchanges {
+		for _, ex := range exchanges {
 			if matcher(ex.URL) {
 				filtered = append(filtered, ex)
 			} else {
 				remaining = append(remaining, ex)
 			}
 		}
-		rs.exchanges = remaining
+		rs.exchangeBuckets[bucket] = remaining
 	} else {
-		filtered = make([]RecordedExchange, len(rs.exchanges))
-		copy(filtered, rs.exchanges)
-		rs.exchanges = make([]RecordedExchange, 0)
+		filtered = make([]RecordedExchange, len(exchanges))
+		copy(filtered, exchanges)
+		delete(rs.exchangeBuckets, bucket)
 	}
 	rs.mu.Unlock()
 
