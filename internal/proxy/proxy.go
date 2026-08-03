@@ -4,10 +4,38 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"errors"
+	"goodmock/internal/common"
+	"log"
+	"net"
 	"strings"
 
 	"github.com/valyala/fasthttp"
 )
+
+// NewClient builds the HTTP client used to reach the upstream.
+//
+// The dial timeout is set explicitly rather than left to fasthttp's 3s default;
+// see common.ProxyDialTimeout for why. Read and write timeouts are deliberately
+// left unset — upstream calls here include long polls that legitimately run for
+// tens of seconds, and capping them would turn slow-but-fine responses into
+// proxy errors.
+//
+// The dialer is owned by this client instead of using the package-level
+// fasthttp.DialTimeout, which delegates to a process-global TCPDialer. Owning it
+// keeps the DNS cache and the concurrency limiter scoped to this client rather
+// than shared with anything else in the process that dials via fasthttp.
+func NewClient() *fasthttp.Client {
+	timeout := common.ProxyDialTimeout()
+	// Concurrency mirrors fasthttp's own default dialer so that owning the
+	// dialer does not silently change how many dials may run at once.
+	dialer := &fasthttp.TCPDialer{Concurrency: 1000}
+	return &fasthttp.Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return dialer.DialTimeout(addr, timeout)
+		},
+	}
+}
 
 // ProxyRequest forwards a request to the upstream server and returns the response details.
 func ProxyRequest(client *fasthttp.Client, upstream string, ctx *fasthttp.RequestCtx) (int, map[string][]string, []byte, error) {
@@ -34,7 +62,22 @@ func ProxyRequest(client *fasthttp.Client, upstream string, ctx *fasthttp.Reques
 		req.SetBody(body)
 	}
 
-	if err := client.Do(req, resp); err != nil {
+	// Retry only on a dial timeout. That error means the TCP connection was
+	// never established, so the upstream cannot have seen — let alone applied —
+	// the request, which makes a retry safe for every method including POST.
+	// Any other failure is returned as-is: once bytes are on the wire we have no
+	// way to know whether the upstream acted on them.
+	attempts := common.ProxyDialAttempts()
+	var err error
+	for attempt := 1; ; attempt++ {
+		err = client.Do(req, resp)
+		if err == nil || attempt >= attempts || !errors.Is(err, fasthttp.ErrDialTimeout) {
+			break
+		}
+		log.Printf("Upstream dial timed out (attempt %d/%d), retrying: %v", attempt, attempts, err)
+		resp.Reset()
+	}
+	if err != nil {
 		return 0, nil, nil, err
 	}
 

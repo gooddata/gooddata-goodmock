@@ -51,7 +51,7 @@ func NewRecordServer(upstream, proxyHost, refererPath string, verbose bool, json
 		server:             server.NewServer(proxyHost, refererPath, verbose, nil),
 		exchanges:          make([]RecordedExchange, 0),
 		upstream:           upstream,
-		client:             &fasthttp.Client{},
+		client:             proxy.NewClient(),
 		jsonContentTypes:   jsonContentTypes,
 		binaryContentTypes: binaryContentTypes,
 		preserveKeyOrder:   preserveKeyOrder,
