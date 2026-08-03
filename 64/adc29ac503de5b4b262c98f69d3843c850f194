@@ -1,0 +1,26 @@
+internal/proxy/proxy_test.go
+  s_7ed8ffa0041940::t_844fc6717b1444 1-89
+README.md
+  s_7ed8ffa0041940::t_dc366e0b3e9bfe 84
+  s_7ed8ffa0041940::t_6da8f5a21b7a1b 74
+CHANGELOG.md
+  s_7ed8ffa0041940::t_a43972bcdb58d2 10
+internal/common/common.go
+  s_7ed8ffa0041940::t_dc523095f299f6 45-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "64adc29ac503de5b4b262c98f69d3843c850f194",
+  "prompts": {},
+  "sessions": {
+    "s_7ed8ffa0041940": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5386a507-8de4-470f-9b24-5c8a1437f033",
+        "model": "claude-opus-5"
+      },
+      "human_author": "tubt <tu.bui@gooddata.com>"
+    }
+  }
+}
