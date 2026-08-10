@@ -13,6 +13,21 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+// Client is the upstream HTTP client together with the dial-attempt budget it
+// was built with.
+//
+// Both settings are resolved once, in NewClient. Reading Attempts per request
+// instead would defer the config check to the first proxied request:
+// common.ProxyDialAttempts calls log.Fatalf on an invalid value, so the process
+// would start, the pod would go Ready, and the proxy would then die on its first
+// request rather than at boot. Pairing the two here also keeps them on one
+// snapshot — the timeout is captured in the dialer closure, so re-reading only
+// the attempts would let the two drift apart.
+type Client struct {
+	HTTP     *fasthttp.Client
+	Attempts int
+}
+
 // NewClient builds the HTTP client used to reach the upstream.
 //
 // The dial timeout is set explicitly rather than left to fasthttp's 3s default;
@@ -25,20 +40,24 @@ import (
 // fasthttp.DialTimeout, which delegates to a process-global TCPDialer. Owning it
 // keeps the DNS cache and the concurrency limiter scoped to this client rather
 // than shared with anything else in the process that dials via fasthttp.
-func NewClient() *fasthttp.Client {
+func NewClient() *Client {
 	timeout := common.ProxyDialTimeout()
+	attempts := common.ProxyDialAttempts()
 	// Concurrency mirrors fasthttp's own default dialer so that owning the
 	// dialer does not silently change how many dials may run at once.
 	dialer := &fasthttp.TCPDialer{Concurrency: 1000}
-	return &fasthttp.Client{
-		Dial: func(addr string) (net.Conn, error) {
-			return dialer.DialTimeout(addr, timeout)
+	return &Client{
+		HTTP: &fasthttp.Client{
+			Dial: func(addr string) (net.Conn, error) {
+				return dialer.DialTimeout(addr, timeout)
+			},
 		},
+		Attempts: attempts,
 	}
 }
 
 // ProxyRequest forwards a request to the upstream server and returns the response details.
-func ProxyRequest(client *fasthttp.Client, upstream string, ctx *fasthttp.RequestCtx) (int, map[string][]string, []byte, error) {
+func ProxyRequest(client *Client, upstream string, ctx *fasthttp.RequestCtx) (int, map[string][]string, []byte, error) {
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseRequest(req)
@@ -67,10 +86,10 @@ func ProxyRequest(client *fasthttp.Client, upstream string, ctx *fasthttp.Reques
 	// the request, which makes a retry safe for every method including POST.
 	// Any other failure is returned as-is: once bytes are on the wire we have no
 	// way to know whether the upstream acted on them.
-	attempts := common.ProxyDialAttempts()
+	attempts := client.Attempts
 	var err error
 	for attempt := 1; ; attempt++ {
-		err = client.Do(req, resp)
+		err = client.HTTP.Do(req, resp)
 		if err == nil || attempt >= attempts || !errors.Is(err, fasthttp.ErrDialTimeout) {
 			break
 		}

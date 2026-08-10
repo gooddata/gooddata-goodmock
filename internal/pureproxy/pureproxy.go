@@ -18,7 +18,7 @@ import (
 type ProxyServer struct {
 	server   *types.Server
 	upstream string
-	client   *fasthttp.Client
+	client   *proxy.Client
 }
 
 func NewProxyServer(upstream, proxyHost, refererPath string, verbose bool) *ProxyServer {

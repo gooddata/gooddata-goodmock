@@ -38,7 +38,7 @@ type RecordServer struct {
 	mu                 sync.Mutex
 	exchanges          []RecordedExchange
 	upstream           string
-	client             *fasthttp.Client
+	client             *proxy.Client
 	jsonContentTypes   []string
 	binaryContentTypes []string
 	preserveKeyOrder   bool
