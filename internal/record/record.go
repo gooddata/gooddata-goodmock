@@ -38,7 +38,7 @@ type RecordServer struct {
 	mu                 sync.Mutex
 	exchanges          []RecordedExchange
 	upstream           string
-	client             *fasthttp.Client
+	client             *proxy.Client
 	jsonContentTypes   []string
 	binaryContentTypes []string
 	preserveKeyOrder   bool
@@ -51,7 +51,7 @@ func NewRecordServer(upstream, proxyHost, refererPath string, verbose bool, json
 		server:             server.NewServer(proxyHost, refererPath, verbose, nil),
 		exchanges:          make([]RecordedExchange, 0),
 		upstream:           upstream,
-		client:             &fasthttp.Client{},
+		client:             proxy.NewClient(),
 		jsonContentTypes:   jsonContentTypes,
 		binaryContentTypes: binaryContentTypes,
 		preserveKeyOrder:   preserveKeyOrder,

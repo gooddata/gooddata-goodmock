@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-08-03
+
+### Added
+- `PROXY_DIAL_TIMEOUT` sets the TCP connect timeout for upstream requests (record and proxy modes), default `30s`
+- `PROXY_DIAL_ATTEMPTS` caps the total number of TCP dial attempts when the connection cannot be established at all, initial dial included, default `3`; set to `1` to disable retrying. Only a dial timeout is retried — other failures, connection refused among them, surface on the first attempt
+- Both variables are resolved once at startup, so an invalid value fails the process at boot rather than on the first proxied request
+
+### Changed
+- Dial timeout default raised from fasthttp's implicit 3s to 30s. Read and write timeouts remain unset, so long-running upstream responses are unaffected.
+
+### Fixed
+- Upstream requests no longer fail after 3s when the upstream is briefly unreachable. The HTTP client was constructed as `&fasthttp.Client{}` with no `Dial`, so it fell back to `fasthttp.DefaultDialTimeout` (3s) with no retry — shorter than a rolling load-balancer or ingress update, during which SYNs go unanswered. Callers saw `502 {"error": "proxy error: error when dialing <addr>: dialing to the given TCP address timed out"}` while the upstream was healthy. The dial timeout is now explicit and a failed dial is retried.
+
 ## [0.11.0] - 2026-04-02
 
 ### Changed
@@ -125,6 +138,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
+[0.12.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.8.0...v0.9.0

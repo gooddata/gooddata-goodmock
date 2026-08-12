@@ -70,12 +70,35 @@ goodmock --version    # print version
 | `PORT`                    | `8080`             | all    | Port to listen on                                                                                     |
 | `PROXY_HOST`              | `http://localhost` | all    | Upstream host (record: proxy target; replay: header rewriting)                                        |
 | `REFERER_PATH`            | `/`                | all    | App-specific path appended to `PROXY_HOST` for Referer header                                         |
+| `PROXY_DIAL_TIMEOUT`      | `30s`              | record, proxy | TCP connect timeout for upstream requests (Go duration, e.g. `10s`)                            |
+| `PROXY_DIAL_ATTEMPTS`     | `3`                | record, proxy | Maximum total TCP dial attempts when the connection cannot be established, initial dial included; `1` disables retrying |
 | `MAPPINGS_DIR`            | _(unset)_          | replay | Directory of JSON mapping files to load on startup                                                    |
 | `VERBOSE`                 | _(unset)_          | all    | Log all request/response traffic (any value enables)                                                  |
 | `JSON_CONTENT_TYPES`      | _(unset)_          | record | Additional Content-Types to store as structured JSON (see below)                                      |
 | `BINARY_CONTENT_TYPES`    | _(unset)_          | record | Content-Types to store as base64-encoded strings (comma-separated)                                    |
 | `PRESERVE_JSON_KEY_ORDER` | _(unset)_          | record | Preserve original key order in JSON request and response bodies (any value enables)                   |
 | `SORT_ARRAY_MEMBERS`      | _(unset)_          | record | Recursively sort JSON array elements by stringified value for deterministic diffs (any value enables) |
+
+### Upstream Connection Handling
+
+Record and proxy modes dial the upstream with a `PROXY_DIAL_TIMEOUT` connect timeout and make at most `PROXY_DIAL_ATTEMPTS` dial attempts in total. The initial dial counts towards that budget, so the default of `3` means one dial plus up to two retries, and `1` disables retrying altogether.
+
+Both values are read once at startup, so an invalid setting fails the process at boot rather than on the first proxied request.
+
+The two settings compound: with the defaults a request can be held for `PROXY_DIAL_ATTEMPTS × PROXY_DIAL_TIMEOUT` = **90s** before the caller sees a 502, up from 3s previously. Two consequences worth knowing:
+
+- Most callers (e2e runners, browsers) have a shorter timeout of their own and will hit it first. From their side the failure mode changes from a fast 502 to their own client timeout.
+- fasthttp's server does not propagate client disconnects into the handler, so GoodMock keeps dialing for the full budget on behalf of a caller that has already given up. The dialer's `Concurrency: 1000` caps how far that can pile up.
+
+Lower `PROXY_DIAL_ATTEMPTS` or `PROXY_DIAL_TIMEOUT` if a faster failure matters more than riding out a rolling upstream restart.
+
+A retry happens **only** when the dial fails with `fasthttp.ErrDialTimeout` — the upstream accepted no SYN within `PROXY_DIAL_TIMEOUT`. Other connection failures are **not** retried, including connection refused: those return an answer immediately, so they indicate something other than the rolling-restart window this budget exists to cover, and retrying would just repeat the same result.
+
+Retrying a timed-out dial is safe for non-idempotent methods such as `POST` because no bytes reached the upstream, so it cannot have acted on the request. Once a connection exists, no failure is retried, because there is no way to tell whether the upstream applied the request.
+
+When the upstream resolves to several addresses (a load balancer with one node per availability zone, for example), consecutive attempts tend to land on different ones: fasthttp advances a round-robin index over the resolved set once per dial, and abandons a dial as soon as an address times out instead of walking the remainder. This rotates over fasthttp's cached address set — the names are only re-resolved after its DNS cache duration (1 minute) expires.
+
+Read and write timeouts are intentionally unset: upstream responses may legitimately take tens of seconds, and capping them would convert slow-but-successful calls into proxy errors.
 
 ### Loading Mappings on Startup
 
