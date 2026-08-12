@@ -1,0 +1,44 @@
+internal/record/record.go
+  s_b2f834e3ae766d::t_2658b2cf101cc0 41
+VERSION
+  s_7ed8ffa0041940::t_02f30e295e934c 1
+internal/pureproxy/pureproxy.go
+  s_b2f834e3ae766d::t_9825ccbb568e54 21
+CHANGELOG.md
+  s_b2f834e3ae766d::t_dd6debc067b2af 12-13
+  s_b2f834e3ae766d::t_560d7eb08dc95e 2,9,22,28,40,45,53,59,64,69,78-80,87,92,100,108,117,127-130,132,137
+internal/proxy/proxy.go
+  s_b2f834e3ae766d::t_5f2f341ae512ac 16-30,43,45,49-53,55
+  s_b2f834e3ae766d::t_1d82c5ffe6f211 60
+  s_b2f834e3ae766d::t_f46fb7bb082f23 89,92
+internal/proxy/proxy_test.go
+  s_b2f834e3ae766d::t_5e77058d9fc630 12-34,44,47-51,56,66-93
+  s_b2f834e3ae766d::t_b1555f9b6b0a5a 104
+  s_b2f834e3ae766d::t_1185bdc19c66ff 117-118
+README.md
+  s_b2f834e3ae766d::t_62c3aa7d962c82 86-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "d8bd1ad99a0105b12dc4054cf87e1f53eadb8c44",
+  "prompts": {},
+  "sessions": {
+    "s_7ed8ffa0041940": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5386a507-8de4-470f-9b24-5c8a1437f033",
+        "model": "claude-opus-5"
+      },
+      "human_author": "tubt <tu.bui@gooddata.com>"
+    },
+    "s_b2f834e3ae766d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d3623b04-aec1-4ecb-80ba-bbfc01fe8081",
+        "model": "claude-opus-5"
+      },
+      "human_author": "tubt <tu.bui@gooddata.com>"
+    }
+  }
+}
