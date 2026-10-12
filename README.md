@@ -134,20 +134,23 @@ Each file should contain a `mappings` array:
 
 GoodMock exposes a subset of the WireMock admin API under `/__admin`:
 
-| Method   | Endpoint                       | Description                            |
-|----------|--------------------------------|----------------------------------------|
-| `GET`    | `/__admin`                     | Health check                           |
-| `GET`    | `/__admin/health`              | Health check                           |
-| `GET`    | `/__admin/mappings`            | List all loaded mappings               |
-| `POST`   | `/__admin/mappings`            | Add a single mapping                   |
-| `DELETE` | `/__admin/mappings`            | Delete all mappings                    |
-| `POST`   | `/__admin/mappings/import`     | Import a batch of mappings             |
-| `POST`   | `/__admin/mappings/reset`      | Reset all mappings                     |
-| `POST`   | `/__admin/reset`               | Reset all mappings                     |
-| `POST`   | `/__admin/settings`            | Acknowledge settings (no-op)           |
-| `POST`   | `/__admin/scenarios/reset`     | Reset scenarios (no-op)                |
-| `DELETE` | `/__admin/requests`            | Clear request log / recordings         |
-| `POST`   | `/__admin/recordings/snapshot` | Export recorded mappings (record mode) |
+| Method   | Endpoint                          | Description                                    |
+|----------|-----------------------------------|------------------------------------------------|
+| `GET`    | `/__admin`                        | Health check                                   |
+| `GET`    | `/__admin/health`                 | Health check                                   |
+| `GET`    | `/__admin/mappings`               | List all loaded mappings                       |
+| `POST`   | `/__admin/mappings`               | Add a single mapping                           |
+| `DELETE` | `/__admin/mappings`               | Delete all mappings                            |
+| `POST`   | `/__admin/mappings/import`        | Import a batch of mappings                     |
+| `POST`   | `/__admin/mappings/reset`         | Reset all mappings                             |
+| `POST`   | `/__admin/reset`                  | Reset all mappings                             |
+| `POST`   | `/__admin/settings`               | Acknowledge settings (no-op)                   |
+| `POST`   | `/__admin/scenarios/reset`        | Reset scenarios (no-op)                        |
+| `DELETE` | `/__admin/requests`               | Clear request log / recordings                 |
+| `POST`   | `/__admin/recordings/snapshot`    | Export recorded mappings (record mode)         |
+| `POST`   | `/__admin/mappings/bucket/{name}` | Set the current recording bucket (record mode) |
+
+In record mode, the recording endpoints (`/__admin/recordings/snapshot`, `/__admin/reset`, `/__admin/mappings/reset`, `DELETE /__admin/requests`) accept an optional `/{bucket}` path suffix to target a specific bucket — see [Recording Buckets](#recording-buckets).
 
 ### Adding a Mapping at Runtime
 
@@ -191,6 +194,39 @@ The snapshot endpoint supports:
 - `filters.urlPattern` — regex to filter which recordings to include
 - `repeatsAsScenarios` — when `true`, creates scenario-based mappings for repeated URLs
 - `persist` — accepted but ignored (mappings are always returned in the response)
+
+### Recording Buckets
+
+Record mode stores exchanges in named **buckets** rather than a single shared pool. This lets you carve a single recording session into independent groups — for example, recording mappings per individual test instead of per spec file.
+
+There are two ways to choose a bucket:
+
+- **Current cursor bucket** — set with `POST /__admin/mappings/bucket/{name}` (or a JSON body `{"bucket": "..."}`). Proxied requests without the header record into this bucket, and admin operations without a `/{bucket}` suffix act on it. Defaults to `default`.
+- **Per-request override** — send the `X-GOODMOCK-BUCKET` header on a proxied request to record that single exchange into the named bucket, regardless of the current cursor. The header is stripped before the request is forwarded upstream and is never stored in the mapping.
+
+The recording admin endpoints take an optional `/{bucket}` path suffix; when omitted they act on the current cursor bucket:
+
+```bash
+# Route to bucket "test-2" for the next group of requests
+curl -X POST http://localhost:8080/__admin/mappings/bucket/test-2
+
+# Snapshot (and drain) a specific bucket
+curl -X POST http://localhost:8080/__admin/recordings/snapshot/test-2 \
+  -H "Content-Type: application/json" \
+  -d '{"persist": false, "repeatsAsScenarios": false}'
+
+# Reset (clear) a specific bucket
+curl -X POST http://localhost:8080/__admin/mappings/reset/test-2
+
+# Record a one-off request into bucket "test-2" via header
+curl http://localhost:8080/api/users -H "X-GOODMOCK-BUCKET: test-2"
+```
+
+> **Note:** `X-GOODMOCK-BUCKET` is only honored on proxied (recorded) requests. Admin endpoints resolve the bucket from the `/{bucket}` path suffix, falling back to the current cursor bucket — they ignore the header.
+>
+> Every reset and snapshot targets exactly **one** bucket; there is no operation that spans all buckets. In particular, `POST /__admin/reset` no longer wipes all recordings (the pre-0.13.0 behaviour) — it clears only the resolved bucket, so exchanges recorded into other buckets stay in memory until each bucket is snapshotted or reset itself.
+>
+> Recording is **serial** — a single recording session at a time. Buckets isolate groups *within* that session; they do not make concurrent recording safe.
 
 ## Proxy Mode
 

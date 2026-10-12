@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-10-12
+
+### Added
+- Record mode now stores exchanges in named **buckets** instead of a single shared pool, enabling per-test (not just per-spec) recording without stash/re-import
+- `X-GOODMOCK-BUCKET` request header routes an individual proxied (recorded) request to a specific bucket; the header is stripped before the request is proxied upstream and is never stored in the mapping
+- `POST /__admin/mappings/bucket/{name}` (or JSON body `{"bucket": "..."}`) sets the current cursor bucket used when no bucket is given explicitly
+- `/__admin/recordings/snapshot`, `/__admin/reset`, `/__admin/mappings/reset`, and `DELETE /__admin/requests` now accept an optional `/{bucket}` path suffix
+
+### Changed
+- Bucket resolution precedence for admin operations: explicit `/{bucket}` path param → current cursor bucket. The `X-GOODMOCK-BUCKET` header is only honored on proxied requests, never on admin endpoints
+- When no bucket is specified, record-mode admin operations now act on the current cursor bucket (defaulting to `default`) rather than a single global pool
+
 ## [0.12.0] - 2026-08-03
 
 ### Added
@@ -138,6 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
+[0.13.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.9.0...v0.10.0
