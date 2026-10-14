@@ -19,6 +19,7 @@ type Mapping struct {
 	NewScenarioState      string   `json:"newScenarioState,omitempty"`
 	Request               Request  `json:"request"`
 	Response              Response `json:"response"`
+	Matched               bool     `json:"-"`
 }
 
 // Request represents the request matching criteria

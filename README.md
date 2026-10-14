@@ -8,7 +8,7 @@ A lightweight, high-performance mock server written in Go, powered by [fasthttp]
 - Request matching by URL, URL path, URL pattern (regex), query parameters, headers, and JSON body
 - Runtime mapping management via `/__admin` endpoints
 - Load mappings from JSON files on startup
-- Detailed mismatch logging (WireMock-style diagnostics)
+- Detailed mismatch and unused-stub logging (WireMock-style diagnostics)
 - Minimal Docker image (built from `scratch`)
 
 ## Install
@@ -151,6 +151,12 @@ GoodMock exposes a subset of the WireMock admin API under `/__admin`:
 | `POST`   | `/__admin/mappings/bucket/{name}` | Set the current recording bucket (record mode) |
 
 In record mode, the recording endpoints (`/__admin/recordings/snapshot`, `/__admin/reset`, `/__admin/mappings/reset`, `DELETE /__admin/requests`) accept an optional `/{bucket}` path suffix to target a specific bucket — see [Recording Buckets](#recording-buckets).
+
+In replay mode, `POST /__admin/reset` and `POST /__admin/mappings/reset` accept an optional `?logUnusedMappings` query parameter. When present (no value needed), every loaded stub that never matched a request is logged before the mappings are cleared — see [Unused Stub Logging](#unused-stub-logging).
+
+```bash
+curl -X POST "http://localhost:8080/__admin/mappings/reset?logUnusedMappings"
+```
 
 ### Adding a Mapping at Runtime
 
@@ -311,6 +317,27 @@ Requests are matched against loaded mappings using the following criteria:
 | `bodyPatterns`     | Match JSON body (`equalToJson`)                      |
 
 When no mapping matches, GoodMock returns a `404` with a diagnostic log showing the closest stub and where the mismatch occurred.
+
+### Unused Stub Logging
+
+Replay mode tracks which stubs have served at least one request. Resetting with `?logUnusedMappings` (see [Admin API](#admin-api)) prints a WireMock-style table for each stub that was never matched, with the stub's request matchers on the left and its response on the right:
+
+```
+                                               Stub was unused
+                                               ===============
+
+-----------------------------------------------------------------------------------------------------------------------
+| Stub request                                               | Stub response                                              |
+-----------------------------------------------------------------------------------------------------------------------
+                                                            |
+ GET                                                        |  Status: 200
+ [urlPath] /api/v1/entities/workspaces                      |  Header: Content-Type: application/json
+ Query: size [equalTo 50]                                   |  Body [json] {"data":[]}
+                                                            |
+-----------------------------------------------------------------------------------------------------------------------
+```
+
+This is useful for spotting recorded stubs a test no longer exercises, so they can be pruned from the mapping files.
 
 ## WireMock Compatibility
 
