@@ -121,6 +121,10 @@ func handleReplayRequest(s *types.Server, ctx *fasthttp.RequestCtx) {
 	}
 
 	m := result.Mapping
+	s.Mu.Lock()
+	m.Matched = true
+	s.Mu.Unlock()
+
 	applyResponseHeaders(ctx, m.Response.Headers)
 
 	ctx.SetStatusCode(m.Response.Status)
@@ -170,6 +174,9 @@ func applyResponseHeaders(ctx *fasthttp.RequestCtx, headers map[string]any) {
 
 func handleReplayAdmin(s *types.Server, ctx *fasthttp.RequestCtx, path, method string) {
 	if path == "/__admin/reset" && method == "POST" {
+		if wantsUnusedLog(ctx) {
+			logUnusedMappings(s)
+		}
 		server.ClearMappings(s)
 		log.Println("All mappings reset")
 		ctx.SetStatusCode(fasthttp.StatusOK)
@@ -202,13 +209,36 @@ func handleReplayAdmin(s *types.Server, ctx *fasthttp.RequestCtx, path, method s
 	}
 
 	if path == "/__admin/mappings/reset" && method == "POST" {
+		if wantsUnusedLog(ctx) {
+			logUnusedMappings(s)
+		}
 		server.ClearMappings(s)
+		log.Println("All mappings reset")
 		ctx.SetStatusCode(fasthttp.StatusOK)
 		return
 	}
 
 	// Delegate everything else to the server's common admin handler
 	server.HandleAdmin(ctx, path, method)
+}
+
+// wantsUnusedLog reports whether the reset request carries a logUnusedMappings
+// query parameter. Presence alone enables it, e.g. /__admin/mappings/reset?logUnusedMappings
+func wantsUnusedLog(ctx *fasthttp.RequestCtx) bool {
+	return ctx.QueryArgs().Has("logUnusedMappings")
+}
+
+// logUnusedMappings logs every loaded stub that no replayed request has matched.
+func logUnusedMappings(s *types.Server) {
+	s.Mu.RLock()
+	defer s.Mu.RUnlock()
+
+	for i := range s.Mappings {
+		m := &s.Mappings[i]
+		if !m.Matched {
+			logging.LogUnused(*m)
+		}
+	}
 }
 
 func handleMappings(s *types.Server, ctx *fasthttp.RequestCtx, method string) {

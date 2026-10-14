@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-10-14
+
+### Added
+- Replay mode now tracks which stubs have served at least one request. `POST /__admin/reset` and `POST /__admin/mappings/reset` accept an optional `?logUnusedMappings` query parameter (presence alone enables it, no value needed); when present, every stub that was never matched is logged before the mappings are cleared
+- `LogUnused` logging helper prints an unused stub as a two-column WireMock-style table (stub request on the left, stub response on the right), showing whichever of `url`, `urlPath` or `urlPattern` the stub uses, plus query parameter, header and body matchers, and the response status, headers and body
+
+### Changed
+- `POST /__admin/mappings/reset` now logs "All mappings reset", matching `POST /__admin/reset`
+
 ## [0.13.0] - 2026-10-12
 
 ### Added
@@ -150,6 +159,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
+[0.14.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/gooddata/gooddata-goodmock/compare/v0.10.0...v0.11.0
